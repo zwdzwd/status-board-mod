@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.7.12
+# Status Board rules (meta/instruction) — v0.7.13
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 

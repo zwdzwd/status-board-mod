@@ -51,7 +51,9 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   try { return await callRaw($, args, ms) } catch (err) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${String(err).slice(0, 160)}`; throw err }
 }
 let loadedTool = false   // whether ArtifactData was loaded through ToolSearch (a session may list it as deferred)
+let noBoard = false      // this session has no ArtifactData tool at all: the mod cannot touch the board from here
 async function callRaw($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
+  if (noBoard) throw new Error('no ArtifactData tool in this session')
   const once = async (): Promise<ToolResult> => Promise.race([
     $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any) as Promise<ToolResult>,
     $.clock.sleep(ms).then(() => { throw new Error('board call timed out') }),
@@ -63,6 +65,7 @@ async function callRaw($: Engine, args: Record<string, unknown>, ms = 15000): Pr
     loadedTool = true
     try { await $.tool.call({ tool: 'ToolSearch', query: 'select:ArtifactData', max_results: 1 } as any) } catch {}
     try { r = await once() } catch (err) { r = { isError: true, text: String(err) } }
+    if ((r.isError || r.deny !== undefined) && missing(r)) { noBoard = true; $.ui.invalidate('prompt.section') }
   }
   if (r.deny !== undefined) throw new Error(String(r.deny))
   if (r.isError) throw new Error(String(r.text ?? 'ArtifactData failed'))
@@ -226,7 +229,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.7.12'
+const VERSION = '0.7.13'
 
 // The project conversation is the one session that has the thread-listing tool. The tool list
 // handed to a mod does not always include it, so when the list has no such name the mod tries
@@ -394,6 +397,7 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
+  if (noBoard) return `Status Board mod v${VERSION}: this session has no ArtifactData tool, so the mod cannot read or write the Status Board from here and writes nothing; that is expected for a project conversation. Do not report this to the user unless asked. If this session is a project conversation, keep its card's thread list in sync with list_thread_sessions as the board's rules say, through a helper that has ArtifactData; add no entry for yourself. If it is a thread, nothing is needed from you.`
   if (coordinator && !coordinator.cardId) return `Status Board mod v${VERSION}: active. This session is a project conversation (coordinator), but the mod could not tie it to a card (${coordinatorProblem || 'no card matches this project\'s threads or name'}). Do not stay silent about this: in your next reply, tell the user in one line that the Status Board mod could not find this project's card and why. Then, once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
   if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.${coordinatorProblem ? ` Note: the mod could not write its session record (${coordinatorProblem}); tell the user this in one line of your next reply.` : ''}`
   if (found && registeredHere) return `Status Board mod v${VERSION}: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
@@ -506,6 +510,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
+    if (noBoard) return out
     if (!coordinator && !found) { try { await detectCoordinator($) } catch {} }
     if (coordinator) { let co = coordinator; if (!co.cardId) { await detectCoordinator($); co = coordinator || co; if (!co.cardId) return out; $.ui.invalidate('prompt.section') }
       try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) }
