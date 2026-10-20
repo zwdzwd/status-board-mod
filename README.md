@@ -8,9 +8,8 @@ Three parts, one version number (`VERSION`; the same string is in
 - **The plugin** (`.claude-plugin/`, `hooks/register.ts`): a Claude Code plugin. In a
   thread it registers the thread on its project's card and writes the thread's status
   (thinking / working / waiting on you / idle, plus a job line) at the start and end of
-  every turn. In the project conversation (the coordinator) it keeps the card's thread
-  list equal to `list_thread_sessions` after every turn and writes the coordinator's own
-  status to `card.coordinator` (the stripe on the card's left edge).
+  every turn. A project conversation has no ArtifactData tool, so the mod writes nothing
+  there; the project's Claude keeps the card's thread list in sync by the rules instead.
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF, capabilities `db` and
   `user`). After a change, publish it to that same URL.
