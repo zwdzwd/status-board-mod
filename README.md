@@ -6,7 +6,8 @@ In any Claude Code thread that is registered on the board (its card lists the th
 
 - writes `thinking` to the thread's entry at the start of every turn;
 - writes `waiting_on_you` or `idle` at the end of every turn, judged from the reply;
-- adds a `/board` command that says which card and thread the chat updates.
+- adds a `/board` command that says which card and thread the chat updates;
+- adds one line to the system prompt naming this session's id, so the thread records it on its card entry (`transcript`) and the mod can find itself.
 
 It never touches the thread's `job` field (a running machine job) or any other thread's entry.
 

@@ -82,7 +82,14 @@ function setStatus($: Engine, status: string): Promise<void> {
 function describe(): string {
   return found
     ? `This chat is "${found.label}" on the ${found.name} card.${lastWrite ? ` Last status written: ${lastWrite.replace(/_/g, ' ')}.` : ''}`
-    : `This chat is not on the Status Board yet (no card lists session ${sessionId}). Say "update the board" once so the project registers it, then run /board again.`
+    : `This chat is not on the Status Board yet: no thread entry carries this session's id ${sessionId}. Say "update the board" once; the project then writes its entry with transcript: ${sessionId}, and the mod takes over.`
+}
+
+// The thread's own Claude writes the card, so tell it the id the mod looks for.
+function boardNote(): string {
+  return found
+    ? `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
+    : `Status Board mod: active, but no thread entry on the board carries this session's id yet. When you write this project's card, set this thread's entry's transcript field to ${sessionId} (keep session as well); the mod then finds the thread and writes its status by itself.`
 }
 
 async function decide($: Engine, answer: string): Promise<string> {
@@ -110,6 +117,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Adds one line to the system prompt so the thread records the id the mod matches on.
+  on('prompt.compose', async ($, e, next) => {
+    const r = await next(e)
+    if (!sessionId) return r
+    return { sections: [...r.sections.filter(s => s.id !== 'status-board:note'), { id: 'status-board:note', text: boardNote(), scope: 'session' as const }] }
+  })
+
   on('command.run', { command: 'board' }, async ($, e, next) => {
     if (!found) { try { found = await locate($) } catch {} }
     return { text: describe() }
@@ -124,7 +138,11 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
-    if (e.agentId !== undefined || !found) return out
+    if (e.agentId !== undefined) return out
+    if (!found) {   // the thread may have registered itself during this turn
+      try { found = await locate($); if (found) { $.ui.invalidate('prompt.section'); $.ui.status(`board: ${found.name} / ${found.label}`) } } catch {}
+      if (!found) return out
+    }
     const status = e.isAborted ? 'idle' : await decide($, e.answer || '')
     void setStatus($, status)
     return out
