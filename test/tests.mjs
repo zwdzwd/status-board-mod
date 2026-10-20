@@ -214,5 +214,11 @@ console.log('W. a thread waiting on you says what for, and the line goes away wh
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'All done.', reason: 'answer' }); await settle()
   ok(!('waiting' in E.entry('methscope')), 'gone once idle') }
 
+
+console.log('X. every note after the lookup gives the board address and where the rules are')
+{ for (const opts of [{ db: card([{ label: 'HPC', session: R }]) }, { db: card([]), cwd: '/home/x' }, { noArtifactData: true, tools: ['mcp__hb__start_thread_session'] }]) {
+    const E = await env(opts); await E.fire('session.start', {}); await settle()
+    const n = await E.note(); ok(n.includes(BOARD) && /collection meta, doc_id instruction/.test(n), 'address in: ' + n.slice(0, 60)) } }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

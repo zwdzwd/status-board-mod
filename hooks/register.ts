@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.2'
+const VERSION = '0.9.3'
 const PLUGIN = 'status-board'
 const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
 const NOTE_ID = 'status-board:note'
@@ -481,9 +481,14 @@ function tell(count: boolean): string {
   if (count) composedReport = report
   return ` Tell the user in one line of your reply: ${report}.`
 }
+// Where the board and its rules are, added to every note: nothing else tells a session the address.
+const WHERE = ` (The Status Board is the artifact ${BOARD}, read and written with the ArtifactData tool; its rules are the "rules" field of collection meta, doc_id instruction.)`
 function boardNote(count: boolean): string {
   const v = `Status Board mod v${VERSION}`
   if (!initDone) return `${v}: looking up this chat on the Status Board. Nothing is needed from you for it.`
+  return noteBody(count, v) + WHERE
+}
+function noteBody(count: boolean, v: string): string {
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. Keep the card's thread list in step with the project's threads as the board's rules say.`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
   if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.`
