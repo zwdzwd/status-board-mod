@@ -55,7 +55,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .sec-head .n{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
 .sec-empty{font-size:13px;color:var(--muted);margin:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));grid-auto-rows:minmax(var(--card-h),auto);gap:6px;align-items:stretch}
-.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:5px 7px 5px 10px;display:flex;flex-direction:column;gap:2px;cursor:pointer;overflow:hidden;min-width:0;min-height:var(--card-h);box-sizing:border-box}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:5px 7px;display:flex;flex-direction:column;gap:2px;cursor:pointer;overflow:hidden;min-width:0;min-height:var(--card-h);box-sizing:border-box}
 .top{display:flex;align-items:baseline;gap:6px}
 .top h3{font-family:var(--f-display);font-weight:700;font-size:13.5px;line-height:1.2;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .line{margin:0;font-size:11.5px;line-height:1.3;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;flex-shrink:0}
@@ -64,9 +64,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .line.next,.line.next b{color:var(--ok)}
 .line.bad,.line.bad b{color:var(--bad)}
 .card.open{background:var(--idle-soft);border-color:var(--accent)}
-.stripe{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line)}
-.stripe.c-thinking{background:var(--think)} .stripe.c-working{background:var(--ok)} .stripe.c-waiting{background:var(--warn)} .stripe.c-idle{background:var(--idle)}
-.stripe.c-thinking,.stripe.c-working{animation:pulse 1.6s ease-in-out infinite}
 .body{display:flex;gap:6px;flex:1;min-width:0;align-items:flex-start}
 .threads{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:0 0 38%;max-width:38%;min-width:0}
 .text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
@@ -108,7 +105,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="copyBtn" type="button" title="Copy the text for Settings, Instructions for Claude">Copy Claude instruction</button></div>
   </header>
 
-  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span><span class="muted">· left stripe = the project conversation</span></div>
+  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
   <div class="live" id="live" hidden><span class="ldot"></span><span id="liveText"></span></div>
 
   <div id="board" aria-live="polite">
@@ -138,7 +135,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.9";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.10";   // one version for board, mod and rules; bump all three together
   let projects = [], instruction = "";
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -181,8 +178,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   const endedAfterAt = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
   const ORDER = ["waiting","thinking","working","idle"];
   function cardKey(p){
-    const items = arr(p.threads).filter(Boolean).concat(p.coordinator && typeof p.coordinator === "object" && !(p.coordinator.ended && endedAfterAt(p.coordinator)) ? [p.coordinator] : []);
-    const ks = items.map(threadState).filter(Boolean).map(s => s.key);
+    const ks = arr(p.threads).filter(Boolean).map(threadState).filter(Boolean).map(s => s.key);
     for (const k of ORDER) if (ks.includes(k)) return k;
     return stKey(p.status);
   }
@@ -195,11 +191,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
   function card(p){
     const c = el("article",{class:"card"});
-    // The project conversation's own status: a stripe down the card's left edge.
-    const co = p.coordinator && typeof p.coordinator === "object" ? p.coordinator : null;
-    const cs = co ? threadState(co) : null;
-    const ck = cs && !(co.ended && endedAfterAt(co)) ? cs.key : (co ? "idle" : "");
-    c.append(el("span",{class:"stripe" + (ck ? " c-" + ck : ""),title: co ? "Project conversation: " + (ck ? STATUS[ck].label.toLowerCase() : "no status") + (co.ended && endedAfterAt(co) ? ", session ended " + ago(co.ended) : (co.at ? ", " + ago(co.at) : "")) : "Project conversation: no status yet"}));
     const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
     if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
     c.append(top);

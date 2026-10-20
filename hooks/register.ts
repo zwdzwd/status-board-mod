@@ -50,12 +50,21 @@ let lastError = ''   // the last failed board call, shown in the note when the m
 async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
   try { return await callRaw($, args, ms) } catch (err) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${String(err).slice(0, 160)}`; throw err }
 }
+let loadedTool = false   // whether ArtifactData was loaded through ToolSearch (a session may list it as deferred)
 async function callRaw($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
-  const r = await Promise.race([
-    $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any),
+  const once = async (): Promise<ToolResult> => Promise.race([
+    $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any) as Promise<ToolResult>,
     $.clock.sleep(ms).then(() => { throw new Error('board call timed out') }),
   ])
-  if (r.deny !== undefined) throw new Error(r.deny)
+  let r: ToolResult
+  try { r = await once() } catch (err) { r = { isError: true, text: String(err) } }
+  const missing = (x: ToolResult) => /unknown tool|not found|no such tool|not available|not loaded|deferred|unavailable/i.test(String(x.deny ?? x.text ?? ''))
+  if ((r.isError || r.deny !== undefined) && missing(r) && !loadedTool) {
+    loadedTool = true
+    try { await $.tool.call({ tool: 'ToolSearch', query: 'select:ArtifactData', max_results: 1 } as any) } catch {}
+    try { r = await once() } catch (err) { r = { isError: true, text: String(err) } }
+  }
+  if (r.deny !== undefined) throw new Error(String(r.deny))
   if (r.isError) throw new Error(String(r.text ?? 'ArtifactData failed'))
   return String(r.text ?? '')
 }
@@ -217,7 +226,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.7.9'
+const VERSION = '0.7.10'
 
 // The project conversation is the one session that has the thread-listing tool. The tool list
 // handed to a mod does not always include it, so when the list has no such name the mod tries
@@ -229,15 +238,20 @@ type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: u
 async function listToolName($: Engine): Promise<string> {
   if (listTool !== null) return listTool
   try { toolNames = (await $.tool.list()).map(t => t.name) } catch { toolNames = [] }
-  let n = toolNames.find(x => /(^|__)list_thread_sessions$/.test(x)) || toolNames.find(x => /list_thread/i.test(x)) || ''
+  // Exact name only (there are other list_thread_* tools); any server prefix is fine.
+  let n = toolNames.find(x => /(^|__)list_thread_sessions$/.test(x)) || ''
   if (!n) {
-    try {
-      const r = await Promise.race([
-        $.tool.call({ tool: 'list_thread_sessions' } as any) as Promise<ToolResult>,
-        $.clock.sleep(15000).then(() => { throw new Error('probe timed out') }),
-      ])
-      if (r && r.deny === undefined && !r.isError) { n = 'list_thread_sessions'; probed = r }
-    } catch {}
+    // Not listed: try the call under the prefixes the sibling project tools use, then bare.
+    const prefixes = [...new Set(toolNames.filter(x => /__(list|start|rename|set)_thread/.test(x)).map(x => x.slice(0, x.lastIndexOf('__') + 2)))]
+    for (const cand of [...prefixes.map(p => p + 'list_thread_sessions'), 'mcp__hearthbot__list_thread_sessions', 'list_thread_sessions']) {
+      try {
+        const r = await Promise.race([
+          $.tool.call({ tool: cand } as any) as Promise<ToolResult>,
+          $.clock.sleep(15000).then(() => { throw new Error('probe timed out') }),
+        ])
+        if (r && r.deny === undefined && !r.isError) { n = cand; probed = r; break }
+      } catch {}
+    }
   }
   listTool = n
   return n
@@ -384,7 +398,7 @@ function boardNote(): string {
   if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.${coordinatorProblem ? ` Note: the mod could not write its session record (${coordinatorProblem}); tell the user this in one line of your next reply.` : ''}`
   if (found && registeredHere) return `Status Board mod v${VERSION}: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod v${VERSION}: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board (${lastError ? 'its board call failed: ' + lastError : 'no card\'s repo or name matches this repository or folder, and no thread entry carries this session\'s id'}; thread-listing tool: ${listTool === null ? 'not probed yet' : listTool || 'none'}; ${toolNames.length} tools listed). Do not stay silent about this: tell the user in one line of your next reply, including the reason in parentheses above. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
+  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board (${lastError ? 'its board call failed: ' + lastError : 'no card\'s repo or name matches this repository or folder, and no thread entry carries this session\'s id'}; thread-listing tool: ${listTool === null ? 'not probed yet' : listTool || 'none'}; ${toolNames.length} tools listed, Artifact tools: ${toolNames.filter(x => /artifact/i.test(x)).join(', ') || 'none'}). Do not stay silent about this: tell the user in one line of your next reply, including the reason in parentheses above. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
@@ -433,7 +447,8 @@ export const register: Register = on => {
       } catch (err) {
         if (!lastError) lastError = 'init: ' + String(err).slice(0, 160)
         $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
-        $.ui.invalidate('prompt.section')
+      } finally {
+        $.ui.invalidate('prompt.section')   // the note is read before this finishes; refresh it with the outcome
       }
     })()
     return next(e)
