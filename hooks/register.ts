@@ -4,7 +4,9 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // its chats under "threads", and a thread entry carries the chat's Claude Code session id.
 const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
 
-type Thread = { label?: string; url?: string; session?: string; status?: string; at?: string }
+type Thread = { label?: string; url?: string; session?: string; status?: string; at?: string; job?: string }
+// A job value meaning "keep whatever job the entry already has, or start a generic one".
+const KEEP = '__keep__'
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 
@@ -56,27 +58,27 @@ async function locate($: Engine): Promise<Found | null> {
 
 // Write this thread's status, touching nothing else on the card. Re-reads first so other
 // threads' entries are kept and the write is pinned to the current version.
-function setStatus($: Engine, status: string): Promise<void> {
-  const job = busy.then(async () => {
+function setStatus($: Engine, status: string, job?: string): Promise<void> {
+  const run = busy.then(async () => {
     if (!found) return
     for (let attempt = 0; attempt < 2; attempt++) {
       const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: found.cardId }))[0]
       if (!card) return
       const now = new Date().toISOString()
       const th = (Array.isArray(card.data.threads) ? (card.data.threads as Thread[]) : [])
-        .map(t => (t && mine(t)) ? { ...t, status, at: now } : t)
+        .map(t => (t && mine(t)) ? { ...t, status, at: now, ...(job === undefined ? {} : { job: job === KEEP ? ((typeof t.job === 'string' && t.job.trim()) || ('background work since ' + now.slice(11, 16) + ' UTC')) : job }) } : t)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: card.version, data: { threads: th } })
         lastWrite = status
-        $.ui.status(`board: ${found.name} / ${found.label} → ${status.replace(/_/g, ' ')}`)
+        $.ui.status(`board: ${found.name} / ${found.label} → ${status.replace(/_/g, ' ')}${job ? ' + job running' : ''}`)
         return
       } catch (err) {
         if (!/version/i.test(String(err))) throw err   // a concurrent write: read again and retry once
       }
     }
   }).catch((err: unknown) => { $.ui.status(`board: write failed (${String(err).slice(0, 60)})`) })
-  busy = job
-  return job
+  busy = run
+  return run
 }
 
 function describe(): string {
@@ -92,15 +94,19 @@ function boardNote(): string {
     : `Status Board mod: active, but no thread entry on the board carries this session's id yet. When you write this project's card, set this thread's entry's transcript field to ${sessionId} (keep session as well); the mod then finds the thread and writes its status by itself.`
 }
 
-async function decide($: Engine, answer: string): Promise<string> {
+// What the reply means for the board: the chat's status, and whether work is still running elsewhere
+// (a remote session, a SLURM job, CI, a build), which the board shows as "working" (green).
+async function decide($: Engine, answer: string): Promise<{ status: string; job?: string }> {
+  const ASK = 'the message asks the user a question, or waits for the user to decide, approve, confirm or provide something'
+  const RUN = 'the message says work is still running and will report later: a job, a remote or background session, a build, a process the assistant is waiting on'
+  const DONE = 'the message reports finished work or information; nothing is still running and nothing is asked of the user'
   try {
-    const k = await $.model.classify(
-      `The assistant's final message of a turn:\n\n${answer.slice(-3000)}`,
-      ['the message asks the user a question, or waits for the user to decide, approve, confirm or provide something',
-       'the message reports finished work or information and asks nothing of the user'])
-    return k && k.startsWith('the message asks') ? 'waiting_on_you' : 'idle'
+    const k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, RUN, DONE])
+    if (k === ASK) return { status: 'waiting_on_you' }            // leave any running job as it is
+    if (k === RUN) return { status: 'idle', job: KEEP }
+    return { status: 'idle', job: '' }
   } catch {
-    return /\?\s*$/m.test(answer) ? 'waiting_on_you' : 'idle'
+    return { status: /\?\s*$/m.test(answer) ? 'waiting_on_you' : 'idle' }
   }
 }
 
@@ -143,8 +149,8 @@ export const register: Register = on => {
       try { found = await locate($); if (found) { $.ui.invalidate('prompt.section'); $.ui.status(`board: ${found.name} / ${found.label}`) } } catch {}
       if (!found) return out
     }
-    const status = e.isAborted ? 'idle' : await decide($, e.answer || '')
-    void setStatus($, status)
+    const d = e.isAborted ? { status: 'idle' } : await decide($, e.answer || '')
+    void setStatus($, d.status, d.job)
     return out
   })
 }
