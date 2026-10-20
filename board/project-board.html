@@ -92,6 +92,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip b{display:block;font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 #tip .bad,#tip .bad b{color:var(--bad)} #tip .next,#tip .next b{color:var(--ok)}
 #tip .meta{margin:0}
+.skillbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.skillbox pre{margin:0;font-family:var(--f-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;user-select:all}
 [hidden]{display:none!important}
 </style>
 
@@ -101,7 +103,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       <h1>Status Board</h1>
       <p class="sub" id="sub">Every project at a glance.</p>
     </div>
-    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a></div>
+    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your update-status-board skill with this board's link">Copy skill setup</button></div>
   </header>
 
   <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
@@ -111,6 +113,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     <div class="empty">Loading projects…</div>
   </div>
 
+  <div id="skillBox" class="skillbox" hidden><p class="muted">Copying was blocked here. Select the text below and copy it, then paste it into any Claude session.</p><pre id="skillText"></pre></div>
   <div id="tip" hidden role="tooltip"></div>
 </div>
 
@@ -132,7 +135,25 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.9.3";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.9.4";
+  let boardLink = "";
+  function skillPrompt(link){
+    return [
+      'Set up my personal skill "update-status-board" so every session knows where my Status Board is. Save it with exactly the content below. If a skill with that name exists and cannot be updated in place, remove it and save this one as new. If you cannot save skills in this session, show me the content so I can add it under Customize, Skills.',
+      '',
+      '---',
+      'name: update-status-board',
+      "description: Update this project's card on Wanding's Status Board, or find the board's address.",
+      '---',
+      '# Status Board',
+      'The Status Board is the artifact ' + link + '. Read and write it with the ArtifactData tool.',
+      'Its rules are the "rules" field of collection meta, doc_id instruction. Read them first and',
+      'follow them; they are the only description of the card format.',
+      "To update this project's card, follow those rules and write only this project's card.",
+      'If the board does not answer, tell the user in one line that the Status Board link in this',
+      'skill no longer works.'
+    ].join("\n");
+  }   // one version for board, mod and rules; bump all three together
   let projects = [];
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -346,6 +367,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     liveSummary();
   }
 
+  $("skillBtn").onclick = async () => {
+    if (!boardLink) return;
+    const text = skillPrompt(boardLink), btn = $("skillBtn");
+    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy skill setup", 1600); $("skillBox").hidden = true; }
+    catch (e) { $("skillText").textContent = text; $("skillBox").hidden = false; }
+  };
+
   (async function start(){
     claude.use("mcp").then(m => { mcp = m;
       if (!mcp) $("live").hidden = true;
@@ -358,6 +386,14 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       projects.forEach(p => { if (p.status) p.threads = arr(p.threads).map(t => t && !t.status ? Object.assign({}, t, {status:p.status, at:t.at || p.updated}) : t); });
       syncWatches(); render();
     }, err => { $("board").replaceChildren(el("div",{class:"empty",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload the page to try again."})); });
+    // The board's own link is kept in its data (meta/instruction.board): a page cannot read its own
+    // address. "Copy skill setup" builds the prompt from it, so a rebuilt board hands out its new link.
+    db.doc("meta/instruction").onSnapshot(s => {
+      const d = s.exists ? s.data() : null;
+      boardLink = d && typeof d.board === "string" && /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+$/.test(d.board) ? d.board : "";
+      $("skillBtn").disabled = !boardLink;
+      $("skillBtn").title = boardLink ? "Copy a prompt that sets up your update-status-board skill with this board's link" : "This board's link is not recorded yet (meta/instruction.board)";
+    }, () => {});
     setInterval(() => { if (projects.length) render(); }, 60000);
   })();
 })();

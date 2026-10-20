@@ -43,7 +43,10 @@ Everything is a one-time step per place; nothing is done per session.
    `claude rc` starts sessions without the interactive install prompt, so the plugin
    still has to be installed once with the two commands above.
 
-3. **Pin the board.** Open the artifact link above once and pin it to the sidebar.
+3. **The skill.** On the board, press **Copy skill setup**, paste the prompt into any Claude
+   session and save the skill it offers. It tells every cloud session where the board is.
+
+4. **Pin the board.** Open the artifact link above once and pin it to the sidebar.
 
 ### A brand-new account (no board yet)
 
@@ -53,6 +56,13 @@ Everything is a one-time step per place; nothing is done per session.
   (fields `rules`, `version`, `updated`).
 - Put the new artifact's URL in `BOARD` at the top of `hooks/register.ts`, commit, push,
   then do steps 1–3 above.
+
+## If the board is lost
+
+Follow `board/RECOVERY.md`: rebuild the page from this repo, record the rules and the new link in
+it, refresh the `update-status-board` skill with the board's **Copy skill setup** button, release
+the plugin with the new link, and paste one prompt into each project's conversation so it
+recreates its card.
 
 ## Updating
 

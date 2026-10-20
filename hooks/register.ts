@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.3'
+const VERSION = '0.9.4'
 const PLUGIN = 'status-board'
 const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
 const NOTE_ID = 'status-board:note'
