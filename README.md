@@ -7,7 +7,7 @@ In any Claude Code thread, the mod:
 - registers the thread on its project's card at session start (matched by the card's `repo` field or name; label "New thread" until the thread's own Claude fills in the name and link on its first turn);
 - writes `thinking` at the start of every turn and `working` while a command runs on a machine for more than a few seconds;
 - writes `waiting_on_you` or `idle` at the end of every turn, judged from the reply, and sets or clears a `job` line when the reply says work is still running elsewhere (a remote session, a SLURM job, CI), which the board shows as working;
-- stamps the entry `ended` when the session ends, so the board can dim a thread that was resolved;
+- stamps the entry `ended` when the session ends; the board dims it at once and removes it after an hour unless the thread is reopened (a resolved thread never is);
 - adds one line to the system prompt naming this session's id and what it did, so the thread's Claude keeps the entry right;
 - adds a `/board` command that says which card and thread the chat updates.
 

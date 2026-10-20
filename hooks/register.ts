@@ -19,6 +19,7 @@ let found: Found | null = null
 let lastWrite = ''
 let registeredHere = false     // this session added its own entry (label and url still to be filled by the thread)
 let busy: Promise<void> = Promise.resolve()
+let lastCard: Card | null = null      // the card as last read or written, for the one-call write at session end
 
 // Session ids are stored as "session_…", "cse_…" or a bare UUID; compare loosely, against any
 // string field of the thread entry (transcript, session, or whatever the thread stored).
@@ -121,6 +122,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean): Pr
     for (let attempt = 0; attempt < 2; attempt++) {
       const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: found.cardId }))[0]
       if (!card) return
+      lastCard = card
       const now = new Date().toISOString()
       const th = threadsOf(card).map(t => {
         if (!t || !mine(t)) return t
@@ -136,7 +138,8 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean): Pr
         return n
       })
       try {
-        await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: card.version, data: { threads: th } })
+        const res = await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: card.version, data: { threads: th } })
+        const v = /version (\d+)/.exec(res); if (v) lastCard = { ...card, version: Number(v[1]), data: { ...card.data, threads: th } }
         lastWrite = status
         $.ui.status(`board: ${found.name} / ${found.label} → ${status.replace(/_/g, ' ')}${job !== undefined && job !== '' && job !== RESTORE ? ' + job running' : ''}`)
         return
@@ -195,8 +198,15 @@ export const register: Register = on => {
   })
 
   // When the session ends (the thread was resolved, or stopped after idling), stamp the entry as ended.
+  // The board hides an ended entry an hour later unless the thread is reopened, which clears the stamp.
+  // One write, pinned to the last version seen, since this hook runs under a short time bound.
   on('session.end', async ($, e, next) => {
-    if (found) { try { await setStatus($, 'idle', undefined, true) } catch {} }
+    if (found && lastCard) {
+      const now = new Date().toISOString()
+      const th = threadsOf(lastCard).map(t => (t && mine(t)) ? { ...t, status: 'idle', at: now, ended: now } : t)
+      try { await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: lastCard.version, data: { threads: th } }) }
+      catch { try { await setStatus($, 'idle', undefined, true) } catch {} }
+    }
     return next(e)
   })
 
