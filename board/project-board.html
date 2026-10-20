@@ -64,10 +64,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .line.next,.line.next b{color:var(--ok)}
 .line.bad,.line.bad b{color:var(--bad)}
 .card.open{background:var(--idle-soft);border-color:var(--accent)}
-.body{display:flex;gap:6px;flex:1;min-width:0;align-items:flex-start}
-.threads{display:flex;flex-direction:column;align-items:flex-start;gap:2px;flex:0 0 38%;max-width:38%;min-width:0}
-.text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-#tip .threads{flex-direction:row;flex-wrap:wrap;flex:none;max-width:none;gap:4px;margin-top:2px;pointer-events:auto}
+.body{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.threads{display:flex;flex-wrap:wrap;gap:3px;margin-top:auto;padding-top:2px}
+.text{min-width:0;display:flex;flex-direction:column;gap:2px}
+#tip .threads{gap:4px;margin-top:2px;pointer-events:auto}
 .tbtn{font-size:11px;font-weight:500;line-height:1.3;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:3px;padding:1px 5px;text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .tbtn:hover{border-color:var(--accent)}
 .tbtn.more{color:var(--muted);background:transparent;border-color:var(--line);cursor:default}
@@ -133,7 +133,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.11";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.12";   // one version for board, mod and rules; bump all three together
   let projects = [];
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -188,12 +188,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   const staleWork = (t, s) => s && !s.live && s.key === "thinking" && t.at && (Date.now() - Date.parse(t.at)) > 3*3600000;
 
   function card(p){
-    const c = el("article",{class:"card"});
+    const c = el("article",{class:"card","data-id":p.id});
     const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
     if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
     c.append(top);
-    // Body: threads stacked top-down on the left (every one of them; the card grows to fit),
-    // summary / next / blockers on the right.
+    // Body: summary / next / blockers, then the thread buttons along the bottom (at most 4, then "… +N").
     const body = el("div",{class:"body"}); c.append(body);
     const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
     const r = el("div",{class:"threads"});
@@ -201,12 +200,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     shown.forEach(t => r.append(threadButton(t)));
     if (all.length > 4) r.append(el("span",{class:"tbtn more",title:all.slice(3).map(t => t.label||"Thread").join(", ") + " — hover the card for all " + all.length,text:"\u2026 +" + (all.length - 3)}));
     if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
-    body.append(r);
     const txt = el("div",{class:"text"}); body.append(txt);
     if (p.summary) txt.append(el("p",{class:"line sum",text:p.summary}));
     const nx = first(p.next); if (nx) txt.append(el("p",{class:"line next"}, el("b",{text:"N",title:"Next"}), nx));
     const bl = first(p.blocker) || first(p.blockers); if (bl) txt.append(el("p",{class:"line bad"}, el("b",{text:"W",title:"Waiting on"}), bl));
     if (!p.summary && !nx && !bl) txt.append(el("p",{class:"line muted",text:"No update yet."}));
+    body.append(r);
     hookTip(c, p);
     return c;
   }
@@ -233,8 +232,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     y = Math.min(Math.max(g, y), Math.max(g, H - th - g));
     t.style.left = x + "px"; t.style.top = y + "px";
   }
-  function showTip(card, p){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = card; card.classList.add("open"); fillTip(p); placeTip(card); }
-  function hideTip(){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = null; $("tip").hidden = true; }
+  let openId = null;   // which project's panel is open; survives re-renders from live updates
+  function showTip(card, p){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = card; openId = p.id; card.classList.add("open"); fillTip(p); placeTip(card); }
+  function hideTip(){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = null; openId = null; $("tip").hidden = true; }
   // Click a card (not a button) to open its full text; click it again, click elsewhere, or press Esc to close.
   function hookTip(c, p){
     c.addEventListener("click", e => { if (e.target.closest("a,button")) return; if (tipFor === c && !$("tip").hidden) hideTip(); else showTip(c, p); });
@@ -252,7 +252,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   }
 
   function render(){
-    hideTip();
+    const keep = openId; tipFor = null; $("tip").hidden = true;
     const b = $("board"); b.replaceChildren();
     const pr = {high:0, medium:1, low:2};
     if (!projects.length){ b.append(el("div",{class:"empty",text:"No projects yet. Say “update the board” inside any Claude project."})); }
@@ -273,6 +273,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       b.append(s);
     });
     const stale = projects.filter(p => !p.updated || (Date.now()-Date.parse(p.updated))/86400000 > 14).length;
+    if (keep){ const p = projects.find(x => x.id === keep); const c = p && document.querySelector('#board .card[data-id="' + CSS.escape(keep) + '"]'); if (p && c) showTip(c, p); else openId = null; }
     $("sub").textContent = projects.length ? projects.length + " project" + (projects.length===1?"":"s") + (stale ? " · " + stale + " not updated in 2+ weeks" : "") + " · v" + VERSION : "Every project at a glance. v" + VERSION;
   }
 
