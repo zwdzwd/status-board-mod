@@ -1,31 +1,36 @@
 import type { Register, EngineInterface as Engine } from 'claude-code'
 
 // The Status Board artifact. Each project has a card in its "projects" collection; each card lists
-// its chats under "threads", and a thread entry carries the chat's Claude Code session id.
+// its chats under "threads", and a thread entry carries this session's id in its transcript field.
 const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
 
-type Thread = { label?: string; url?: string; session?: string; status?: string; at?: string; job?: string }
-// A job value meaning "keep whatever job the entry already has, or start a generic one".
-const KEEP = '__keep__'
+type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
+// Job values with a meaning of their own: keep (or start) a job; a tool run's temporary job; restore
+// the job the entry had before the tool run.
+const KEEP = '__keep__'
+const TOOL = '__tool__:'
+const RESTORE = '__restore__'
+let prevJob: string | undefined       // the entry's job before a tool run replaced it
 
 let sessionId = ''
 let found: Found | null = null
 let lastWrite = ''
+let registeredHere = false     // this session added its own entry (label and url still to be filled by the thread)
 let busy: Promise<void> = Promise.resolve()
 
 // Session ids are stored as "session_…", "cse_…" or a bare UUID; compare loosely, against any
-// string field of the thread entry (session, or a transcript id a thread chose to store).
+// string field of the thread entry (transcript, session, or whatever the thread stored).
 function norm(s: unknown): string { return String(s ?? '').trim().replace(/^cse_/, 'session_') }
 function same(a: unknown, b: unknown): boolean {
   const x = norm(a), y = norm(b)
   return x !== '' && y !== '' && (x === y || x.endsWith(y) || y.endsWith(x))
 }
-
 function mine(t: Thread): boolean {
   return Object.values(t).some(v => typeof v === 'string' && !/^https?:/.test(v) && same(v, sessionId))
 }
+function slug(s: string): string { return s.toLowerCase().replace(/[^a-z0-9]/g, '') }
 
 // ArtifactData prints each document as one JSON line between BEGIN/END markers.
 function parseDocs(text: string): Card[] {
@@ -45,32 +50,95 @@ async function call($: Engine, args: Record<string, unknown>): Promise<string> {
   return String(r.text ?? '')
 }
 
-// Which card and thread this session is: the thread entry whose session id is ours.
-async function locate($: Engine): Promise<Found | null> {
-  const docs = parseDocs(await call($, { action: 'list', collection: 'projects', query: { limit: 200 } }))
+async function cards($: Engine): Promise<Card[]> {
+  return parseDocs(await call($, { action: 'list', collection: 'projects', query: { limit: 200 } }))
+}
+function threadsOf(c: Card): Thread[] { return Array.isArray(c.data.threads) ? (c.data.threads as Thread[]) : [] }
+
+// Which card and thread this session is: the thread entry that carries our session id.
+function findIn(docs: Card[]): Found | null {
   for (const d of docs) {
-    const th = Array.isArray(d.data.threads) ? (d.data.threads as Thread[]) : []
-    const t = th.find(t => t && mine(t))
+    const t = threadsOf(d).find(t => t && mine(t))
     if (t) return { cardId: d.id, name: String(d.data.name ?? d.id), label: String(t.label ?? 'Thread') }
+  }
+  return null
+}
+
+// Which card this session's project is, when the thread isn't registered yet: the card whose repo
+// field matches the session's git remote, or whose id matches the repository or working folder's name.
+async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
+  const names: string[] = []
+  let remote = ''
+  try {
+    const repo = await $.session.repo()
+    if (repo) {
+      if (repo.name) names.push(repo.name.split('/').pop() || '')
+      if (repo.remote) { remote = repo.remote.replace(/\.git$/, '').toLowerCase(); names.push(remote.split(/[/:]/).pop() || '') }
+      names.push(repo.root.split('/').pop() || '')
+    }
+  } catch {}
+  try { names.push((await $.session.root()).split('/').pop() || '') } catch {}
+  try { names.push((await $.session.cwd()).split('/').pop() || '') } catch {}
+  if (remote) {
+    const tail = remote.split(/[/:]/).slice(-2).join('/')
+    for (const d of docs) {
+      const r = typeof d.data.repo === 'string' ? d.data.repo.toLowerCase().replace(/\.git$/, '') : ''
+      if (r && (remote.endsWith(r) || r.endsWith(tail))) return d
+    }
+  }
+  for (const n of names.map(slug).filter(Boolean)) {
+    const d = docs.find(d => slug(d.id) === n || slug(String(d.data.name ?? '')) === n)
+    if (d) return d
+  }
+  return null
+}
+
+// Add this session as a thread of a card. Label and url are unknown to the mod; the thread's own
+// Claude fills them in on its first turn (the system-prompt note asks for that).
+async function registerThread($: Engine, card: Card): Promise<Found | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const fresh = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: card.id }))[0]
+    if (!fresh) return null
+    const existing = findIn([fresh]); if (existing) return existing
+    const now = new Date().toISOString()
+    const th = threadsOf(fresh).concat([{ label: 'New thread', session: sessionId, transcript: sessionId, status: 'idle', at: now, job: '' }])
+    try {
+      await call($, { action: 'update', collection: 'projects', doc_id: card.id, if_version: fresh.version, data: { threads: th } })
+      registeredHere = true
+      return { cardId: fresh.id, name: String(fresh.data.name ?? fresh.id), label: 'New thread' }
+    } catch (err) { if (!/version/i.test(String(err))) throw err }
   }
   return null
 }
 
 // Write this thread's status, touching nothing else on the card. Re-reads first so other
 // threads' entries are kept and the write is pinned to the current version.
-function setStatus($: Engine, status: string, job?: string): Promise<void> {
+// job: undefined leaves the thread's job field alone; "" clears it; KEEP keeps or starts one.
+// ended: true stamps the entry as ended (the board dims it after a day); false clears the stamp.
+function setStatus($: Engine, status: string, job?: string, ended?: boolean): Promise<void> {
   const run = busy.then(async () => {
     if (!found) return
     for (let attempt = 0; attempt < 2; attempt++) {
       const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: found.cardId }))[0]
       if (!card) return
       const now = new Date().toISOString()
-      const th = (Array.isArray(card.data.threads) ? (card.data.threads as Thread[]) : [])
-        .map(t => (t && mine(t)) ? { ...t, status, at: now, ...(job === undefined ? {} : { job: job === KEEP ? ((typeof t.job === 'string' && t.job.trim()) || ('background work since ' + now.slice(11, 16) + ' UTC')) : job }) } : t)
+      const th = threadsOf(card).map(t => {
+        if (!t || !mine(t)) return t
+        const n: Thread = { ...t, status, at: now }
+        if (job !== undefined) {
+          if (job === KEEP) n.job = (typeof t.job === 'string' && t.job.trim()) || ('background work since ' + now.slice(11, 16) + ' UTC')
+          else if (job.startsWith(TOOL)) { prevJob = typeof t.job === 'string' ? t.job : ''; n.job = job.slice(TOOL.length) }
+          else if (job === RESTORE) { n.job = prevJob ?? ''; prevJob = undefined }
+          else n.job = job
+        }
+        if (ended === true) n.ended = now
+        if (ended === false) delete n.ended
+        return n
+      })
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: card.version, data: { threads: th } })
         lastWrite = status
-        $.ui.status(`board: ${found.name} / ${found.label} → ${status.replace(/_/g, ' ')}${job ? ' + job running' : ''}`)
+        $.ui.status(`board: ${found.name} / ${found.label} → ${status.replace(/_/g, ' ')}${job !== undefined && job !== '' && job !== RESTORE ? ' + job running' : ''}`)
         return
       } catch (err) {
         if (!/version/i.test(String(err))) throw err   // a concurrent write: read again and retry once
@@ -84,14 +152,14 @@ function setStatus($: Engine, status: string, job?: string): Promise<void> {
 function describe(): string {
   return found
     ? `This chat is "${found.label}" on the ${found.name} card.${lastWrite ? ` Last status written: ${lastWrite.replace(/_/g, ' ')}.` : ''}`
-    : `This chat is not on the Status Board yet: no thread entry carries this session's id ${sessionId}. Say "update the board" once; the project then writes its entry with transcript: ${sessionId}, and the mod takes over.`
+    : `This chat is not on the Status Board: no card matched this project, and no thread entry carries this session's id ${sessionId}. Say "update the board" once; the project then writes its card and this thread's entry (transcript: ${sessionId}), and the mod takes over.`
 }
 
-// The thread's own Claude writes the card, so tell it the id the mod looks for.
+// The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
-  return found
-    ? `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-    : `Status Board mod: active, but no thread entry on the board carries this session's id yet. When you write this project's card, set this thread's entry's transcript field to ${sessionId} (keep session as well); the mod then finds the thread and writes its status by itself.`
+  if (found && registeredHere) return `Status Board mod: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
+  if (found) return `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
+  return `Status Board mod: active, but it could not match this project to a card on the board. On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
@@ -115,15 +183,24 @@ export const register: Register = on => {
     await $.command.register({ name: 'board', description: 'Show which Status Board card and thread this chat updates' })
     try {
       sessionId = await $.session.id()
-      found = await locate($)
-      $.ui.status(found ? `board: ${found.name} / ${found.label}` : 'board: thread not registered (say "update the board" once)')
+      const docs = await cards($)
+      found = findIn(docs)
+      if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) }
+      if (found) { void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`) }
+      else $.ui.status('board: project not matched; the thread registers itself on its first turn')
     } catch (err) {
       $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
     }
     return next(e)
   })
 
-  // Adds one line to the system prompt so the thread records the id the mod matches on.
+  // When the session ends (the thread was resolved, or stopped after idling), stamp the entry as ended.
+  on('session.end', async ($, e, next) => {
+    if (found) { try { await setStatus($, 'idle', undefined, true) } catch {} }
+    return next(e)
+  })
+
+  // Adds one line to the system prompt so the thread knows what the mod did and what it needs.
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     if (!sessionId) return r
@@ -131,12 +208,27 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'board' }, async ($, e, next) => {
-    if (!found) { try { found = await locate($) } catch {} }
+    if (!found) { try { found = findIn(await cards($)) } catch {} }
     return { text: describe() }
   })
 
-  // Main-loop turns only: thinking at the start; waiting on you / idle at the end. The thread's "job" field
-  // (a machine job it started) is left alone: the board shows an idle thread with a job as working.
+  // While a command runs on a machine for more than a few seconds (a shell, a remote computer, a
+  // browser), the thread is waiting on that machine, not thinking: show it as working (green).
+  let toolDepth = 0, toolTimer: { cancel: () => void } | null = null, toolShown = false
+  on('tool.call', async ($, e, next) => {
+    const name = String(e.tool || '')
+    if (e.agentId !== undefined || !found || !/bash|shell|device|computer|remote|browser|ssh|slurm/i.test(name)) return next(e)
+    const cmd = typeof (e as any).command === 'string' ? ': ' + String((e as any).command).replace(/\s+/g, ' ').slice(0, 60) : ''
+    toolDepth++
+    if (toolDepth === 1) { toolShown = false; toolTimer = $.clock.after(5000, () => { toolShown = true; void setStatus($, 'working', TOOL + name.replace(/^mcp__/, '') + cmd) }) }
+    try { return await next(e) }
+    finally {
+      toolDepth--
+      if (toolDepth === 0) { if (toolTimer) toolTimer.cancel(); toolTimer = null; if (toolShown) { toolShown = false; void setStatus($, 'thinking', RESTORE) } }
+    }
+  })
+
+  // Main-loop turns only: thinking at the start; waiting on you / idle (+ job) at the end.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined && found) void setStatus($, 'thinking')
     return next(e)
@@ -145,12 +237,13 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
-    if (!found) {   // the thread may have registered itself during this turn
-      try { found = await locate($); if (found) { $.ui.invalidate('prompt.section'); $.ui.status(`board: ${found.name} / ${found.label}`) } } catch {}
+    if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
+      try { const f = findIn(await cards($)); if (f) { found = f; registeredHere = false; $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
       if (!found) return out
     }
+    toolDepth = 0; if (toolTimer) { toolTimer.cancel(); toolTimer = null }
     const d = e.isAborted ? { status: 'idle' } : await decide($, e.answer || '')
-    void setStatus($, d.status, d.job)
+    void setStatus($, d.status, d.job === undefined && toolShown ? RESTORE : d.job); toolShown = false
     return out
   })
 }
