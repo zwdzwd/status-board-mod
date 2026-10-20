@@ -60,7 +60,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .line{margin:0;font-size:11.5px;line-height:1.3;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;flex-shrink:0}
 .line.sum{-webkit-line-clamp:2}
 .line b{font-weight:700;font-size:10px;color:var(--muted);margin-right:4px}
-.line.next b{color:var(--ok)}
+.line.next,.line.next b{color:var(--ok)}
 .line.bad b{color:var(--warn)} .line.bad{color:var(--bad)}
 .stripe{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line)}
 .stripe.c-thinking{background:var(--think)} .stripe.c-working{background:var(--ok)} .stripe.c-waiting{background:var(--warn)} .stripe.c-idle{background:var(--idle)} .stripe.c-done{background:var(--accent)}
@@ -92,7 +92,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip h4{font-family:var(--f-display);font-size:16px;margin:0}
 #tip p{margin:0;overflow-wrap:anywhere}
 #tip b{display:block;font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-#tip .bad{color:var(--bad)} #tip .bad b{color:var(--bad)}
+#tip .bad{color:var(--bad)} #tip .bad b{color:var(--warn)} #tip .next,#tip .next b{color:var(--ok)}
 #tip .meta{margin:0}
 [hidden]{display:none!important}
 #promptText{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow-x:auto}
@@ -137,7 +137,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.1";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.2";   // one version for board, mod and rules; bump all three together
   let projects = [], instruction = "";
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -226,7 +226,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
     if (p.summary) t.append(el("p",{text:p.summary}));
-    const nx = arr(p.next); if (nx.length) t.append(el("p",null, el("b",{text:"Next"}), nx.join(" · ")));
+    const nx = arr(p.next); if (nx.length) t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.join(" · ")));
     const bl = first(p.blocker) ? [p.blocker] : arr(p.blockers); if (bl.length) t.append(el("p",{class:"bad"}, el("b",{text:"Waiting on"}), bl.join(" · ")));
     if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));

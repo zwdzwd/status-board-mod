@@ -213,7 +213,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.7.1'
+const VERSION = '0.7.2'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
