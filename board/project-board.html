@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <style>
-/* Layout: foldable sections by kind of work (Papers, Software, Grants, Talks, Personal), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come live from each thread's session when its id is on the card; the card's own status follows its threads. */
+/* Layout: foldable sections by kind of work (Papers, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come live from each thread's session when its id is on the card; the card's own status follows its threads. */
 :root{
   --bg:#f3f5f6; --panel:#ffffff; --fg:#14202a; --muted:#5b6b78; --line:#d9e0e5; --accent:#0f6e7a; --accent-soft:#e1f0f1;
   --think:#2563a8; --think-soft:#e3ecf8; --ok:#2f8a4e; --ok-soft:#e3f3e8; --warn:#b7791f; --warn-soft:#fbf0dc; --bad:#c2410c; --bad-soft:#fde8dd; --idle:#7b8794; --idle-soft:#eceff2;
@@ -121,11 +121,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     idle:{label:"Idle",rank:3}
   };
   // Sections, in page order. A card's "category" picks its section; cards without one go to Papers.
-  const SECTIONS = [
-    {key:"paper", label:"Papers"}, {key:"software", label:"Software"}, {key:"grant", label:"Grants"},
-    {key:"talk", label:"Talks"}, {key:"personal", label:"Personal"}
-  ];
-  const CAT_ALIAS = {papers:"paper", research:"paper", grants:"grant", talks:"talk", tool:"software", tools:"software", code:"software"};
+  // Grants, talks and personal work share one section, Misc.
+  const SECTIONS = [{key:"paper", label:"Papers"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
+  const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
+    grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
   const catKey = c => { const k = String(c || "").toLowerCase().trim(); const a = CAT_ALIAS[k] || k; return SECTIONS.some(s => s.key === a) ? a : "paper"; };
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
@@ -133,7 +132,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.9.1";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.9.2";   // one version for board, mod and rules; bump all three together
   let projects = [];
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);

@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.9.1
+# Status Board rules (meta/instruction) — v0.9.2
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -102,7 +102,9 @@ finishes.
     conversation's own status, written by the mod only (the board shows
     it as the stripe on the card's left edge). Never write or remove it;
     when you update the card, leave this field as it is.
-  - category: paper | software | grant | talk | personal. It picks the
+  - category: paper | software | misc (grants, talks, personal work and
+    anything else; older cards may say grant, talk or personal, which
+    the board also files under Misc). It picks the
     board section. Set it only when creating the card (ask me if
     unclear); never change it afterwards.
   - updated: ISO time now
