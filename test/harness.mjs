@@ -50,7 +50,8 @@ export function makeEnv(opts) {
     env: { get: async (n) => n === 'CLAUDE_CODE_REMOTE_SESSION_ID' ? (state.remote || undefined) : undefined },
     session: { id: async () => state.id, repo: async () => opts.repo || null, root: async () => opts.cwd || '/home/x', cwd: async () => opts.cwd || '/home/x' },
     ui: { status: (s) => statuses.push(s), invalidate: () => {} },
-    model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] } },
+    model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] },
+      complete: async (req) => { state.lastPrompt = req.prompt; return state.summary ? { isAnswered: true, text: state.summary } : { isAnswered: false, reason: 'api-error' } } },
     command: { register: async () => {} },
     fs: { read: async () => '' },
   }

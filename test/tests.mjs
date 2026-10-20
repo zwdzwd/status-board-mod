@@ -198,5 +198,21 @@ console.log('N12. a /context render or an aborted turn does not count as telling
   await E.note(['analysis']); await E.fire('turn.start', {}); await E.note(); await E.fire('turn.complete', { answer: '', reason: 'aborted' }); await settle()
   ok(/Tell the user/.test(await E.note()), 'still to be told') }
 
+
+console.log('W. a thread waiting on you says what for, and the line goes away when it moves on')
+{ const E = await env({ db: card([{ label: 'HPC', session: R }]) })
+  await E.fire('session.start', {}); await settle()
+  E.state.classify = 0; E.state.summary = '"Push the repo and restart Claude in MethScope."\n'
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Done. Can you push and restart?', reason: 'answer' }); await settle()
+  let t = E.entry('methscope'); ok(t.status === 'waiting_on_you' && t.waiting === 'Push the repo and restart Claude in MethScope.', 'summary stored: ' + t.waiting)
+  E.state.summary = undefined
+  await E.fire('turn.start', {}); await settle()
+  t = E.entry('methscope'); ok(t.status === 'thinking' && !('waiting' in t), 'line dropped when thinking')
+  await E.fire('turn.complete', { answer: 'Here are two layouts. Use `a?b` here. Which one should I keep for Figure 2?', reason: 'answer' }); await settle()
+  t = E.entry('methscope'); ok(t.waiting === 'Which one should I keep for Figure 2?', 'fallback to the last question: ' + t.waiting)
+  E.state.classify = 2
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'All done.', reason: 'answer' }); await settle()
+  ok(!('waiting' in E.entry('methscope')), 'gone once idle') }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

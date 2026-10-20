@@ -6,13 +6,13 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.0'
+const VERSION = '0.9.1'
 const PLUGIN = 'status-board'
 const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
 const NOTE_ID = 'status-board:note'
 const PLACEHOLDER = 'New thread'
 
-type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; ended?: string }
+type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
@@ -218,10 +218,11 @@ async function registerThread($: Engine, card: Card): Promise<Found | null> {
 // for, not when it runs, so a /clear in between cannot point it at the wrong entry.
 // status: "" keeps the entry's status. job: undefined leaves the job alone, "" clears it, KEEP keeps
 // it (or starts a generic one), TOOL+text shows a running command, RESTORE puts the old job back.
-// ended: true stamps the entry as ended, false clears the stamp.
+// ended: true stamps the entry as ended, false clears the stamp. waiting: what the user is asked
+// for, kept while the status is waiting_on_you and dropped with any other status.
 let prevJob: string | undefined          // the job a running command replaced
 let toolJob = ''                         // the text shown for that command
-function setStatus($: Engine, status: string, job?: string, ended?: boolean): Promise<void> {
+function setStatus($: Engine, status: string, job?: string, ended?: boolean, waiting?: string): Promise<void> {
   const f = found, ids = myIds(), transcript = sessionId, remote = remoteId
   if (!f) return Promise.resolve()
   return enqueue($, 'status write', async () => {
@@ -238,7 +239,8 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean): Pr
       const th = threadsOf(card).map(t => {
         if (!isMine(t, ids)) return t
         const n: Thread = { ...t }
-        if (status) { n.status = status; n.at = at }
+        if (status) { n.status = status; n.at = at; if (status !== 'waiting_on_you') delete n.waiting }
+        if (waiting && status === 'waiting_on_you') n.waiting = waiting
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
         if (job === KEEP) n.job = (typeof t.job === 'string' && t.job.trim() && t.job !== toolJob) ? t.job : (prevJob || `background work since ${at.slice(11, 16)} UTC`)
@@ -507,15 +509,38 @@ function describe(): string {
 const ASK = 'the message asks the user a question, or waits for the user to decide, approve, confirm or provide something'
 const RUN = 'the message says work is still running and will report later: a job, a remote or background session, a build, a process the assistant is waiting on'
 const DONE = 'the message reports finished work or information; nothing is still running and nothing is asked of the user'
-async function decide($: Engine, answer: string): Promise<{ status: string; job?: string }> {
+async function decide($: Engine, answer: string): Promise<{ status: string; job?: string; waiting?: string }> {
   if (!answer.trim()) return { status: 'idle' }
   let k: string | undefined
   try { k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, RUN, DONE]) } catch {}
-  if (k === ASK) return { status: 'waiting_on_you' }
+  if (k === ASK) return { status: 'waiting_on_you', waiting: await askedFor($, answer) }
   if (k === RUN) return { status: 'idle', job: KEEP }
   if (k === DONE) return { status: 'idle', job: '' }
   const last = answer.trim().split('\n').pop() || ''
-  return { status: /\?\s*$/.test(last) ? 'waiting_on_you' : 'idle' }   // no label: leave the job alone
+  if (/\?\s*$/.test(last)) return { status: 'waiting_on_you', waiting: lastQuestion(answer) }
+  return { status: 'idle' }   // no label: leave the job alone
+}
+
+// What the user is asked for, in one short line for the board: a summary by the small model, or the
+// reply's last question when that fails.
+function lastQuestion(answer: string): string {
+  const qs = answer.replace(/`[^`]*`/g, '').match(/[^.!?\n]{3,}\?/g)
+  return qs ? oneLine(qs[qs.length - 1]) : ''
+}
+function oneLine(s: string): string {
+  const t = s.replace(/\s+/g, ' ').replace(/^["'*\s-]+|["'*\s]+$/g, '').trim()
+  return t.length > 110 ? t.slice(0, 109).trimEnd() + '…' : t
+}
+async function askedFor($: Engine, answer: string): Promise<string> {
+  try {
+    const r = await limit($, $.model.complete({
+      model: 'haiku',
+      maxTokens: 60,
+      prompt: `Below is an assistant's last message to a user. In at most 12 words, say what the user needs to do or decide next, as an imperative (for example "Push the repo and restart Claude in MethScope" or "Choose between the two figure layouts"). Reply with that line only.\n\n<message>\n${answer.slice(-4000)}\n</message>`,
+    }), 15000, 'summary')
+    if (r.isAnswered && r.text && r.text.trim()) return oneLine(r.text)
+  } catch {}
+  return lastQuestion(answer)
 }
 
 // A command shown on the shared board: the program and up to two plain arguments after it, stopping
@@ -642,7 +667,7 @@ export const register: Register = on => {
         if (!found || seq !== turnSeq) return
         const d = reason === 'answer' ? await decide($, answer) : { status: 'idle', job: undefined as string | undefined }
         if (seq !== turnSeq) return
-        await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job)
+        await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
       } catch (err) { $.ui.status(`board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out

@@ -30,7 +30,7 @@ h1{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,4vw,30px);l
 .btn.go:hover{filter:brightness(1.08);color:var(--panel)}
 a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
-.s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--warn)} .s-blocked .dot{background:var(--bad)}
+.s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--bad)} .s-blocked .dot{background:var(--bad)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
 .legend>span{display:inline-flex;align-items:center;gap:6px}
 .live{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
@@ -74,7 +74,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 /* Thread buttons take their thread's own status color; a thread with no status stays neutral. */
 .tbtn.t-thinking{color:var(--think);background:var(--think-soft)} .tbtn.t-thinking:hover{border-color:var(--think)}
 .tbtn.t-working{color:var(--ok);background:var(--ok-soft)} .tbtn.t-working:hover{border-color:var(--ok)}
-.tbtn.t-waiting{color:var(--warn);background:var(--warn-soft)} .tbtn.t-waiting:hover{border-color:var(--warn)}
+.tbtn.t-waiting{color:var(--bad);background:var(--bad-soft)} .tbtn.t-waiting:hover{border-color:var(--bad)}
 .tbtn.t-idle{color:var(--idle);background:var(--idle-soft)} .tbtn.t-idle:hover{border-color:var(--idle)}
 .tbtn.t-ended{color:var(--muted);background:transparent;border:1px dashed var(--line);opacity:.7}
 .tbtn .tdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px;box-sizing:border-box}
@@ -133,7 +133,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.9.0";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.9.1";   // one version for board, mod and rules; bump all three together
   let projects = [];
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -203,7 +203,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const txt = el("div",{class:"text"}); body.append(txt);
     if (p.summary) txt.append(el("p",{class:"line sum",text:p.summary}));
     const nx = first(p.next); if (nx) txt.append(el("p",{class:"line next"}, el("b",{text:"N",title:"Next"}), nx));
-    const bl = first(p.blocker) || first(p.blockers); if (bl) txt.append(el("p",{class:"line bad"}, el("b",{text:"W",title:"Waiting on"}), bl));
+    const bl = asks(p)[0] || first(p.blocker) || first(p.blockers); if (bl) txt.append(el("p",{class:"line bad"}, el("b",{text:"W",title:"Waiting on you"}), bl));
     if (!p.summary && !nx && !bl) txt.append(el("p",{class:"line muted",text:"No update yet."}));
     body.append(r);
     hookTip(c, p);
@@ -212,11 +212,16 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
   // ---- Hover card with the full text ----
   let tipTimer = null, tipFor = null;
+  // What the chats waiting on you ask for, as "Label: request" (the plugin writes it with the status).
+  function asks(p){
+    return arr(p.threads).filter(t => t && typeof t.waiting === "string" && t.waiting.trim() && (threadState(t) || {}).key === "waiting")
+      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).map(t => (t.label || "Thread") + ": " + t.waiting.trim());
+  }
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); if (nx.length) t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.join(" · ")));
-    const bl = first(p.blocker) ? [p.blocker] : arr(p.blockers); if (bl.length) t.append(el("p",{class:"bad"}, el("b",{text:"Waiting on"}), bl.join(" · ")));
+    const bl = asks(p).concat(first(p.blocker) ? [p.blocker] : arr(p.blockers)); if (bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"})); bl.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
     if (all.length){ const r = el("div",{class:"threads"}); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
@@ -247,7 +252,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s);
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
-    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (s.live ? ", live" : (t.at ? ", reported " + ago(t.at) : ", as of the last card update")) + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "");
+    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (s.live ? ", live" : (t.at ? ", reported " + ago(t.at) : ", as of the last card update")) + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
     return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (tk ? ", " + STATUS[tk].label : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"));
   }
 
