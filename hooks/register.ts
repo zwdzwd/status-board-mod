@@ -54,8 +54,39 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   return String(r.text ?? '')
 }
 
+// The whole board, for finding or guessing a card. A long listing comes back as a saved file, not as
+// text, so read that file when the text holds no documents.
 async function cards($: Engine): Promise<Card[]> {
-  return parseDocs(await call($, { action: 'list', collection: 'projects', query: { limit: 200 } }))
+  const text = await call($, { action: 'list', collection: 'projects', query: { limit: 200 } })
+  let docs = parseDocs(text)
+  if (!docs.length) {
+    const m = /(\/[^\s"']+\.(?:txt|json|md))/.exec(text)
+    if (m) { try { docs = parseDocs(await $.fs.read(m[1])) } catch {} }
+  }
+  return docs
+}
+
+// The index: sessions/<session id> -> { card, label }, so a session finds its card with one small read.
+async function indexLookup($: Engine): Promise<Found | null> {
+  try {
+    const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
+    const cardId = d && typeof d.data.card === 'string' ? d.data.card : ''
+    if (!cardId) return null
+    const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]
+    if (!card) return null
+    return findIn([card])
+  } catch { return null }
+}
+async function indexWrite($: Engine, f: Found): Promise<void> {
+  try {
+    const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
+    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: f.cardId, label: f.label, at: new Date().toISOString() } }
+    if (d) args.if_version = d.version
+    await call($, args)
+  } catch {}
+}
+async function locate($: Engine): Promise<Found | null> {
+  return (await indexLookup($)) || findIn(await cards($))
 }
 function threadsOf(c: Card): Thread[] { return Array.isArray(c.data.threads) ? (c.data.threads as Thread[]) : [] }
 
@@ -109,7 +140,9 @@ async function registerThread($: Engine, card: Card): Promise<Found | null> {
     try {
       await call($, { action: 'update', collection: 'projects', doc_id: card.id, if_version: fresh.version, data: { threads: th } })
       registeredHere = true
-      return { cardId: fresh.id, name: String(fresh.data.name ?? fresh.id), label: 'New thread' }
+      const f = { cardId: fresh.id, name: String(fresh.data.name ?? fresh.id), label: 'New thread' }
+      void indexWrite($, f)
+      return f
     } catch (err) { if (!/version/i.test(String(err))) throw err }
   }
   return null
@@ -196,10 +229,9 @@ export const register: Register = on => {
     // Board work runs in the background: it must never hold up the session's start.
     void (async () => {
       try {
-        const docs = await cards($)
-        found = findIn(docs)
-        if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) }
-        if (found) { void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
+        found = await indexLookup($)
+        if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
+        if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
         else $.ui.status('board: project not matched; the thread registers itself on its first turn')
       } catch (err) {
         $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
@@ -229,7 +261,7 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'board' }, async ($, e, next) => {
-    if (!found) { try { found = findIn(await cards($)) } catch {} }
+    if (!found) { try { found = await locate($); if (found) void indexWrite($, found) } catch {} }
     return { text: describe() }
   })
 
@@ -259,7 +291,7 @@ export const register: Register = on => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
-      try { const f = findIn(await cards($)); if (f) { found = f; registeredHere = false; $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
+      try { const f = await locate($); if (f) { found = f; registeredHere = false; void indexWrite($, f); $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
       if (!found) return out
     }
     toolDepth = 0; if (toolTimer) { toolTimer.cancel(); toolTimer = null }
