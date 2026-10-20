@@ -212,7 +212,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.4'
+const VERSION = '0.6.5'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -318,7 +318,7 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
 }
 
 function describe(): string {
-  if (coordinator) return `This session is the project conversation for the ${coordinator.name} card; it keeps the card's thread list and has no thread entry of its own.`
+  if (coordinator) return `Status Board mod v${VERSION}. This session is the project conversation for the ${coordinator.name} card; it keeps the card's thread list and has no thread entry of its own.`
   return found
     ? `This chat is "${found.label}" on the ${found.name} card.${lastWrite ? ` Last status written: ${lastWrite.replace(/_/g, ' ')}.` : ''}`
     : `This chat is not on the Status Board: no card matched this project, and no thread entry carries this session's id ${sessionId}. Say "update the board" once; the project then writes its card and this thread's entry (transcript: ${sessionId}), and the mod takes over.`
@@ -326,11 +326,11 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
-  if (coordinator && !coordinator.cardId) return `Status Board mod: active. This session is a project conversation (coordinator), but no card on the board matches this project's threads yet. Once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
-  if (coordinator) return `Status Board mod: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.`
-  if (found && registeredHere) return `Status Board mod: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
-  if (found) return `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-  return `Status Board mod: active, but it could not match this session to a card on the board. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
+  if (coordinator && !coordinator.cardId) return `Status Board mod v${VERSION}: active. This session is a project conversation (coordinator), but no card on the board matches this project's threads yet. Once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
+  if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.`
+  if (found && registeredHere) return `Status Board mod v${VERSION}: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
+  if (found) return `Status Board mod v${VERSION}: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
+  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
@@ -352,7 +352,9 @@ async function decide($: Engine, answer: string): Promise<{ status: string; job?
 export const register: Register = on => {
   // The board's own calls never need a permission dialog: this plugin's reads and writes of the board are allowed here.
   on('tool.check', ($, e, next) => {
-    const mine = String((next.origin && next.origin.plugin) || '').split('@')[0] === $.plugin.name
+    const base = (n: unknown) => String(n || '').split('@')[0].split('/').pop() || ''
+    const o = base(next.origin && next.origin.plugin), me = base($.plugin.name)
+    const mine = !!o && (o === me || o === 'status-board' || o.endsWith('status-board'))
     const ok = mine && (e.tool !== 'ArtifactData' || (e as any).url === BOARD)
     return ok ? { decision: 'allow' as const } : next(e)
   }).catch(($, e, next) => next(e))
