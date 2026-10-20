@@ -18,6 +18,7 @@ let sessionId = ''
 let found: Found | null = null
 let lastWrite = ''
 let registeredHere = false     // this session added its own entry (label and url still to be filled by the thread)
+let coordinator: { cardId: string; name: string } | null = null   // this session is a project conversation, not a thread
 let busy: Promise<void> = Promise.resolve()
 let lastCard: Card | null = null      // the card as last read or written, for the one-call write at session end
 
@@ -74,6 +75,7 @@ async function indexLookup($: Engine): Promise<Found | null> {
     if (!cardId) return null
     const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]
     if (!card) return null
+    if (d.data.role === 'coordinator') { coordinator = { cardId, name: String(card.data.name ?? cardId) }; return null }
     return findIn([card])
   } catch { return null }
 }
@@ -189,6 +191,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean): Pr
 }
 
 function describe(): string {
+  if (coordinator) return `This session is the project conversation for the ${coordinator.name} card; it keeps the card's thread list and has no thread entry of its own.`
   return found
     ? `This chat is "${found.label}" on the ${found.name} card.${lastWrite ? ` Last status written: ${lastWrite.replace(/_/g, ' ')}.` : ''}`
     : `This chat is not on the Status Board: no card matched this project, and no thread entry carries this session's id ${sessionId}. Say "update the board" once; the project then writes its card and this thread's entry (transcript: ${sessionId}), and the mod takes over.`
@@ -196,9 +199,10 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
+  if (coordinator) return `Status Board mod: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}), so the mod tracks no thread for it. You own the card's thread list: on every turn where a thread was created, renamed, resolved or reopened, read the card and make its threads match the project's open threads (remove resolved ones, add new ones with label and url, fix labels), keeping the other fields of entries that stay. Never add an entry for yourself.`
   if (found && registeredHere) return `Status Board mod: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-  return `Status Board mod: active, but it could not match this project to a card on the board. On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
+  return `Status Board mod: active, but it could not match this session to a card on the board. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
@@ -230,6 +234,7 @@ export const register: Register = on => {
     void (async () => {
       try {
         found = await indexLookup($)
+        if (coordinator) { $.ui.status(`board: coordinator of ${coordinator.name}`); $.ui.invalidate('prompt.section'); return }
         if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
         if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
         else $.ui.status('board: project not matched; the thread registers itself on its first turn')
@@ -290,8 +295,11 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
+    if (coordinator) return out
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
-      try { const f = await locate($); if (f) { found = f; registeredHere = false; void indexWrite($, f); $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
+      try { const f = await locate($); const co = coordinator as { cardId: string; name: string } | null
+        if (co) { $.ui.invalidate('prompt.section'); $.ui.status(`board: coordinator of ${co.name}`); return out }
+        if (f) { found = f; registeredHere = false; void indexWrite($, f); $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
       if (!found) return out
     }
     toolDepth = 0; if (toolTimer) { toolTimer.cancel(); toolTimer = null }
