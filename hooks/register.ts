@@ -44,8 +44,11 @@ function parseDocs(text: string): Card[] {
   return out
 }
 
-async function call($: Engine, args: Record<string, unknown>): Promise<string> {
-  const r = await $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any)
+async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
+  const r = await Promise.race([
+    $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any),
+    $.clock.sleep(ms).then(() => { throw new Error('board call timed out') }),
+  ])
   if (r.deny !== undefined) throw new Error(r.deny)
   if (r.isError) throw new Error(String(r.text ?? 'ArtifactData failed'))
   return String(r.text ?? '')
@@ -182,18 +185,26 @@ async function decide($: Engine, answer: string): Promise<{ status: string; job?
 }
 
 export const register: Register = on => {
+  // The board's own calls never need a permission dialog: this plugin's reads and writes of the board are allowed here.
+  on('tool.check', { tool: 'ArtifactData' }, ($, e, next) =>
+    next.origin.plugin === $.plugin.name && (e as any).url === BOARD ? { decision: 'allow' as const } : next(e),
+  ).catch(($, e, next) => next.called ? next(e) : { decision: 'deny' as const })
+
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: 'Show which Status Board card and thread this chat updates' })
-    try {
-      sessionId = await $.session.id()
-      const docs = await cards($)
-      found = findIn(docs)
-      if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) }
-      if (found) { void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`) }
-      else $.ui.status('board: project not matched; the thread registers itself on its first turn')
-    } catch (err) {
-      $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
-    }
+    try { sessionId = await $.session.id() } catch {}
+    // Board work runs in the background: it must never hold up the session's start.
+    void (async () => {
+      try {
+        const docs = await cards($)
+        found = findIn(docs)
+        if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) }
+        if (found) { void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
+        else $.ui.status('board: project not matched; the thread registers itself on its first turn')
+      } catch (err) {
+        $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
+      }
+    })()
     return next(e)
   })
 
@@ -204,8 +215,8 @@ export const register: Register = on => {
     if (found && lastCard) {
       const now = new Date().toISOString()
       const th = threadsOf(lastCard).map(t => (t && mine(t)) ? { ...t, status: 'idle', at: now, ended: now } : t)
-      try { await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: lastCard.version, data: { threads: th } }) }
-      catch { try { await setStatus($, 'idle', undefined, true) } catch {} }
+      try { await call($, { action: 'update', collection: 'projects', doc_id: found.cardId, if_version: lastCard.version, data: { threads: th } }, 4000) }
+      catch {}
     }
     return next(e)
   })
