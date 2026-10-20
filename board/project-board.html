@@ -1,0 +1,392 @@
+<title>Status Board</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: foldable sections by kind of work (Papers, Software, Grants, Talks, Personal), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come live from each thread's session when its id is on the card; the card's own status follows its threads. */
+:root{
+  --bg:#f3f5f6; --panel:#ffffff; --fg:#14202a; --muted:#5b6b78; --line:#d9e0e5; --accent:#0f6e7a; --accent-soft:#e1f0f1;
+  --think:#2563a8; --think-soft:#e3ecf8; --ok:#2f8a4e; --ok-soft:#e3f3e8; --warn:#b7791f; --warn-soft:#fbf0dc; --bad:#c2410c; --bad-soft:#fde8dd; --idle:#7b8794; --idle-soft:#eceff2;
+  --f-display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --card-h:168px; /* every card is this tall; longer text is clipped, full text in the hover card */
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f161b; --panel:#17212a; --fg:#e4ebef; --muted:#93a3ae; --line:#2a3743; --accent:#4fb8c4; --accent-soft:#163238;
+  --think:#6ea8f0; --think-soft:#16263a; --ok:#5cc47f; --ok-soft:#163223; --warn:#e3a94a; --warn-soft:#352a14; --bad:#f07a45; --bad-soft:#3a1e12; --idle:#8d9aa6; --idle-soft:#222d36; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f161b; --panel:#17212a; --fg:#e4ebef; --muted:#93a3ae; --line:#2a3743; --accent:#4fb8c4; --accent-soft:#163238;
+  --think:#6ea8f0; --think-soft:#16263a; --ok:#5cc47f; --ok-soft:#163223; --warn:#e3a94a; --warn-soft:#352a14; --bad:#f07a45; --bad-soft:#3a1e12; --idle:#8d9aa6; --idle-soft:#222d36; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13px;line-height:1.45}
+.wrap{max-width:1240px;margin:0 auto;padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,4vw,30px);line-height:1.1;margin:0}
+.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+.btn{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.go{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+.btn.go:hover{filter:brightness(1.08);color:var(--panel)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
+.s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--warn)} .s-blocked .dot{background:var(--bad)} .s-done .dot{background:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend>span{display:inline-flex;align-items:center;gap:6px}
+.live{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.live .ldot{width:7px;height:7px;border-radius:50%;background:var(--idle)}
+.live.on .ldot{background:var(--ok)}
+.jump{display:flex;flex-wrap:wrap;gap:6px}
+.jump a{font-size:13px;color:var(--fg);text-decoration:none;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 10px}
+.jump a:hover{border-color:var(--accent);color:var(--accent)}
+.jump a .n{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);margin-left:5px}
+#board{display:flex;flex-direction:column;gap:26px}
+.section{display:flex;flex-direction:column;gap:10px}
+.section>.grid,.section>.sec-empty{margin-top:10px}
+.sec-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);padding-bottom:6px;cursor:pointer;list-style:none;user-select:none}
+.sec-head::-webkit-details-marker{display:none}
+.sec-head::before{content:"";width:0;height:0;border-left:6px solid var(--muted);border-top:5px solid transparent;border-bottom:5px solid transparent;align-self:center;transition:transform .15s}
+.section[open]>.sec-head::before{transform:rotate(90deg)}
+.sec-head:hover h2{color:var(--accent)}
+.sec-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sec-head .sum-dots{display:inline-flex;gap:8px;margin-left:auto;font-size:12px;color:var(--muted)}
+.sec-head .sum-dots span{display:inline-flex;align-items:center;gap:4px}
+.sec-head h2{font-family:var(--f-display);font-weight:700;font-size:17px;margin:0}
+.sec-head .n{font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.sec-empty{font-size:13px;color:var(--muted);margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));grid-auto-rows:minmax(var(--card-h),auto);gap:10px;align-items:stretch}
+.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 11px;display:flex;flex-direction:column;gap:4px;cursor:default;overflow:hidden;min-width:0;min-height:var(--card-h);box-sizing:border-box}
+.top{display:flex;align-items:baseline;gap:8px}
+.top h3{font-family:var(--f-display);font-weight:700;font-size:15px;line-height:1.2;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.line{margin:0;font-size:12px;line-height:1.4;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;flex-shrink:0}
+.line.sum{-webkit-line-clamp:2}
+.line b{font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-right:6px}
+.line.bad b,.line.bad{color:var(--bad)}
+.threads{display:flex;flex-wrap:wrap;gap:4px;flex-shrink:0;margin-top:auto;max-height:48px;overflow:hidden}
+#tip .threads{max-height:none;overflow:visible;margin-top:2px;pointer-events:auto}
+.tbtn{font-size:11.5px;font-weight:500;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:999px;padding:1px 8px;text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.tbtn:hover{border-color:var(--accent)}
+/* Thread buttons take their thread's own status color; a thread with no status stays neutral. */
+.tbtn.t-thinking{color:var(--think);background:var(--think-soft)} .tbtn.t-thinking:hover{border-color:var(--think)}
+.tbtn.t-working{color:var(--ok);background:var(--ok-soft)} .tbtn.t-working:hover{border-color:var(--ok)}
+.tbtn.t-waiting{color:var(--warn);background:var(--warn-soft)} .tbtn.t-waiting:hover{border-color:var(--warn)}
+.tbtn.t-idle{color:var(--idle);background:var(--idle-soft)} .tbtn.t-idle:hover{border-color:var(--idle)}
+.tbtn.t-done{color:var(--accent);background:var(--accent-soft)}
+.tbtn.t-ended{color:var(--muted);background:transparent;border:1px dashed var(--line);opacity:.7}
+.tbtn .tdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px;vertical-align:1px;box-sizing:border-box}
+.tbtn.stale{border:1px dashed currentColor;opacity:.75}
+.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:none}}
+.meta{font-family:var(--f-mono);font-size:10.5px;color:var(--muted);flex-shrink:0;white-space:nowrap}
+.muted{color:var(--muted)}
+.empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:24px;color:var(--muted);text-align:center}
+/* Hover card: the full text of a card, shown next to it. */
+#tip{position:fixed;z-index:30;pointer-events:auto;width:min(380px,calc(100vw - 24px));background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:8px}
+#tip h4{font-family:var(--f-display);font-size:16px;margin:0}
+#tip p{margin:0;overflow-wrap:anywhere}
+.tbtn.more{color:var(--muted);background:transparent;border-color:var(--line);cursor:default}
+#tip b{display:block;font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+#tip .bad{color:var(--bad)} #tip .bad b{color:var(--bad)}
+#tip .meta{margin:0}
+#promptText{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow-x:auto}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Status Board</h1>
+      <p class="sub" id="sub">Every project at a glance.</p>
+    </div>
+    <button class="btn" id="copyBtn" type="button" title="Copy the text for Settings, Instructions for Claude">Copy Claude instruction</button>
+  </header>
+
+  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span><span class="s-done"><span class="dot"></span>Done</span></div>
+  <div class="live" id="live" hidden><span class="ldot"></span><span id="liveText"></span></div>
+
+  <div id="board" aria-live="polite">
+    <div class="empty">Loading projects…</div>
+  </div>
+
+  <pre id="promptText" hidden></pre>
+  <div id="tip" hidden role="tooltip"></div>
+</div>
+
+<script>
+(function(){
+  const STATUS = {
+    waiting:{label:"Waiting on you",rank:0}, thinking:{label:"Thinking",rank:1}, working:{label:"Working",rank:2},
+    idle:{label:"Idle",rank:3}, done:{label:"Done",rank:4}
+  };
+  // Sections, in page order. A card's "category" picks its section; cards without one go to Papers.
+  const SECTIONS = [
+    {key:"paper", label:"Papers"}, {key:"software", label:"Software"}, {key:"grant", label:"Grants"},
+    {key:"talk", label:"Talks"}, {key:"personal", label:"Personal"}
+  ];
+  const CAT_ALIAS = {papers:"paper", research:"paper", grants:"grant", talks:"talk", tool:"software", tools:"software", code:"software"};
+  const catKey = c => { const k = String(c || "").toLowerCase().trim(); const a = CAT_ALIAS[k] || k; return SECTIONS.some(s => s.key === a) ? a : "paper"; };
+  // Cards written before the switch to Claude Code's buckets keep rendering.
+  const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle"};
+  const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
+  // A thread session's live bucket, as Claude Code Remote reports it.
+  const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
+  const CCR = "Claude Code Remote";
+  let projects = [], instruction = "";
+  let mcp = null; const live = {}, watches = {};
+  const $ = id => document.getElementById(id);
+  const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
+    if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
+    for (const k of kids) if (k != null) n.append(k); return n; };
+  const arr = v => Array.isArray(v) ? v.filter(x => x != null && x !== "") : (v ? [v] : []);
+  const safe = u => typeof u === "string" && /^https:\/\//.test(u);
+  const first = v => Array.isArray(v) ? arr(v)[0] : (typeof v === "string" ? v : "");
+  // Thread entries may carry the session id as session_… or cse_…; get_session takes session_….
+  const sid = t => { const s = t && typeof t.session === "string" ? t.session.trim() : "";
+    return /^(session|cse)_[A-Za-z0-9]+$/.test(s) ? s.replace(/^cse_/, "session_") : ""; };
+
+  function ago(iso){
+    if (!iso) return "never";
+    const t = Date.parse(iso); if (isNaN(t)) return "";
+    const d = (Date.now() - t) / 86400000;
+    if (d < 1/24) return "just now";
+    if (d < 1) return Math.round(d*24) + "h ago";
+    if (d < 14) return Math.round(d) + "d ago";
+    return new Date(t).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
+  }
+
+  // A thread's state. "status" is the chat itself: thinking (Claude is on a turn), waiting on you, or idle.
+  // "job" is a machine job the thread started (SLURM, CI, a build): while one is set, an idle chat shows as working.
+  // Thinking beats working, since a thinking thread can take something else only once it is done.
+  function threadState(t){
+    const L = live[sid(t)];
+    // "working" is written while a command runs on a machine (the mod) or a job is running (the rules).
+    const raw = t.status ? stKey(t.status) : "";
+    const job = (typeof t.job === "string" && t.job.trim()) || "";
+    let S = raw ? {key:raw, live:false, note:""} : (job ? {key:"idle", live:false, note:""} : null);
+    const fresh = t.at && (Date.now() - Date.parse(t.at)) < 3*3600000;
+    if (L && L.key === "thinking") S = {key:"thinking", live:true, note:L.note};
+    else if (S && S.key === "thinking" && fresh) { /* keep the stored thinking */ }
+    else if (L && L.key) S = {key:L.key, live:true, note:L.note};
+    if (S && S.key === "idle" && job) S = {key:"working", live:S.live, note:job === "a job" ? "" : job};
+    return S;
+  }
+  const endedAfterAt = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
+  const ORDER = ["waiting","thinking","working","idle","done"];
+  function cardKey(p){
+    const ks = arr(p.threads).filter(Boolean).map(threadState).filter(Boolean).map(s => s.key);
+    for (const k of ORDER) if (ks.includes(k)) return k;
+    return stKey(p.status);
+  }
+  // Which sections are folded is remembered per browser.
+  let folded = new Set();
+  try { folded = new Set(JSON.parse(localStorage.getItem("sb-folded") || "[]")); } catch(e){}
+  function saveFolded(){ try { localStorage.setItem("sb-folded", JSON.stringify([...folded])); } catch(e){} }
+  // A stored "thinking" with no update for 3+ hours is probably stale (live statuses never are).
+  const staleWork = (t, s) => s && !s.live && s.key === "thinking" && t.at && (Date.now() - Date.parse(t.at)) > 3*3600000;
+
+  function card(p){
+    const c = el("article",{class:"card"});
+    const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
+    if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
+    c.append(top);
+    if (p.summary) c.append(el("p",{class:"line sum",text:p.summary}));
+    const nx = first(p.next); if (nx) c.append(el("p",{class:"line"}, el("b",{text:"Next"}), nx));
+    const bl = first(p.blocker) || first(p.blockers); if (bl) c.append(el("p",{class:"line bad"}, el("b",{text:"Waiting on"}), bl));
+    hookTip(c, p);
+    if (!p.summary && !nx && !bl) c.append(el("p",{class:"line muted",text:"No update yet."}));
+    // Every thread stays on the card (the coordinator removes resolved ones). The row shows as many as fit
+    // in two lines; the rest are listed in the hover panel, which shows them all.
+    const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
+    if (all.length){ const r = el("div",{class:"threads"});
+    all.forEach(t => r.append(threadButton(t)));
+    c.append(r); }
+    return c;
+  }
+
+  // ---- Hover card with the full text ----
+  let tipTimer = null, tipFor = null;
+  function fillTip(p){
+    const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
+    if (p.summary) t.append(el("p",{text:p.summary}));
+    const nx = arr(p.next); if (nx.length) t.append(el("p",null, el("b",{text:"Next"}), nx.join(" · ")));
+    const bl = first(p.blocker) ? [p.blocker] : arr(p.blockers); if (bl.length) t.append(el("p",{class:"bad"}, el("b",{text:"Waiting on"}), bl.join(" · ")));
+    if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
+    const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
+    if (all.length){ const r = el("div",{class:"threads"}); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
+    t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
+  }
+  function placeTip(card){
+    const t = $("tip"), r = card.getBoundingClientRect(), W = innerWidth, H = innerHeight, g = 8;
+    t.hidden = false; const tw = t.offsetWidth, th = t.offsetHeight;
+    let x = r.right + g, y = r.top;
+    if (x + tw > W - g) x = r.left - g - tw;            // no room on the right: go left
+    if (x < g){ x = Math.min(Math.max(g, r.left), W - tw - g); y = r.bottom + g;   // no room either side: go below
+      if (y + th > H - g) y = r.top - g - th; }       // or above
+    y = Math.min(Math.max(g, y), Math.max(g, H - th - g));
+    t.style.left = x + "px"; t.style.top = y + "px";
+  }
+  function showTip(card, p){ clearTimeout(tipTimer); tipFor = card; fillTip(p); placeTip(card); }
+  function hideTip(){ clearTimeout(tipTimer); tipFor = null; $("tip").hidden = true; }
+  function hookTip(c, p){
+    c.addEventListener("mouseenter", e => { if (e.pointerType === "touch") return; clearTimeout(tipTimer); tipTimer = setTimeout(() => showTip(c, p), 250); });
+    c.addEventListener("mouseleave", e => { if (e.relatedTarget && $("tip").contains(e.relatedTarget)) return; hideTip(); });
+    $("tip").onmouseleave = e => { if (tipFor && e.relatedTarget && tipFor.contains(e.relatedTarget)) return; hideTip(); };
+    // Thread buttons have their own tooltip; hide the card's while over them.
+    c.addEventListener("mouseover", e => { if (e.target.closest(".tbtn")) hideTip(); });
+    c.addEventListener("mouseout", e => { if (e.target.closest(".tbtn") && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".tbtn")) && c.contains(e.relatedTarget)) showTip(c, p); });
+    // Touch: tap a card (not a button) to show or hide its full text.
+    c.addEventListener("click", e => { if (e.target.closest("a,button")) return; if (tipFor === c && !$("tip").hidden) hideTip(); else showTip(c, p); });
+  }
+  document.addEventListener("click", e => { if (!e.target.closest(".card")) hideTip(); });
+  addEventListener("scroll", hideTip, {passive:true});
+  addEventListener("resize", hideTip);
+
+  function threadButton(t){
+    const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s);
+    const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
+    if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
+    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (s.live ? ", live" : (t.at ? ", reported " + ago(t.at) : ", as of the last card update")) + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "");
+    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (tk ? ", " + STATUS[tk].label : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread") + " \u2197");
+  }
+
+  // A card's thread row shows what fits in two lines; buttons past that are hidden and a "+N …"
+  // pill says how many more there are (the hover panel lists them all).
+  function fitThreads(row){
+    const btns = [...row.querySelectorAll(".tbtn:not(.more)")];
+    btns.forEach(b => b.style.display = "");
+    row.querySelectorAll(".more").forEach(m => m.remove());
+    if (!row.clientHeight) return;   // in a folded section: nothing to measure yet
+    const limit = row.clientHeight + 1;
+    const over = b => b.offsetTop + b.offsetHeight > limit;
+    let hidden = btns.filter(over);
+    if (!hidden.length) return;
+    hidden.forEach(b => b.style.display = "none");
+    const more = el("span",{class:"tbtn more"}); row.append(more);
+    const label = () => { more.textContent = "+" + hidden.length + " …"; more.title = hidden.map(b => b.textContent).join(", ") + " — hover the card to see all"; };
+    label();
+    // The pill itself may not fit; give up visible buttons from the end until it does.
+    for (let guard = 0; guard < btns.length && over(more); guard++){
+      const vis = btns.filter(b => b.style.display !== "none"); const last = vis[vis.length - 1]; if (!last) break;
+      last.style.display = "none"; hidden = [last].concat(hidden); label();
+    }
+  }
+  function fitAllThreads(){ document.querySelectorAll("#board .card .threads").forEach(fitThreads); }
+  addEventListener("resize", fitAllThreads);
+
+  function render(){
+    hideTip();
+    const b = $("board"); b.replaceChildren();
+    const pr = {high:0, medium:1, low:2};
+    if (!projects.length){ b.append(el("div",{class:"empty",text:"No projects yet. Say “update the board” inside any Claude project."})); }
+    else SECTIONS.forEach(sec => {
+      const rows = projects.filter(p => catKey(p.category) === sec.key)
+        .sort((a,b) => (pr[a.priority] ?? 1) - (pr[b.priority] ?? 1) || String(a.name||a.id).localeCompare(String(b.name||b.id), undefined, {sensitivity:"base"}));
+      const id = "sec-" + sec.key;
+      // Folded sections show a status tally in their header so nothing urgent hides.
+      const tally = {}; rows.forEach(p => { const k = cardKey(p); tally[k] = (tally[k]||0) + 1; });
+      const dots = el("span",{class:"sum-dots"});
+      ["waiting","working"].forEach(k => { if (tally[k]) dots.append(el("span",{class:"s-"+k}, el("span",{class:"dot"}), tally[k] + " " + STATUS[k].label.toLowerCase())); });
+      const s = el("details",{class:"section",id:id},
+        el("summary",{class:"sec-head"}, el("h2",{text:sec.label}), el("span",{class:"n",text:String(rows.length)}), dots));
+      s.open = !folded.has(sec.key);
+      s.addEventListener("toggle", () => { if (s.open) folded.delete(sec.key); else folded.add(sec.key); saveFolded(); if (s.open) fitAllThreads(); });
+      if (rows.length){ const g = el("div",{class:"grid"}); rows.forEach(p => g.append(card(p))); s.append(g); }
+      else s.append(el("p",{class:"sec-empty",text:"Nothing here yet."}));
+      b.append(s);
+    });
+    fitAllThreads();
+    const stale = projects.filter(p => !p.updated || (Date.now()-Date.parse(p.updated))/86400000 > 14).length;
+    $("sub").textContent = projects.length ? projects.length + " project" + (projects.length===1?"":"s") + (stale ? " · " + stale + " not updated in 2+ weeks" : "") : "Every project at a glance.";
+  }
+
+  // ---- Live thread status ----
+  let liveIssue = "", approvalBtn = null;
+  function setLive(text, on){
+    const box = $("live"); box.classList.toggle("on", !!on); $("liveText").textContent = text;
+    if (approvalBtn && liveIssue !== "approval_required"){ approvalBtn.remove(); approvalBtn = null; }
+  }
+  function liveSummary(){
+    const ids = Object.keys(watches), got = ids.filter(i => live[i] && live[i].key).length;
+    if (!mcp) return;
+    if (liveIssue === "needs_reauth") return setLive("Live thread status is off: reconnect Claude Code Remote in claude.ai Settings → Connectors.", false);
+    if (liveIssue === "server_not_connected") return setLive("Live thread status is off: add the Claude Code Remote connector in claude.ai Settings → Connectors.", false);
+    if (liveIssue === "not_allowed") return setLive("Live thread status is off for this page (Claude Code Remote was not allowed; " + (lastNote || "no code") + ").", false);
+    if (liveIssue === "approval_required"){
+      setLive("Live thread status needs your approval.", false);
+      if (!approvalBtn){ approvalBtn = el("button",{class:"btn",type:"button",text:"Allow live status"});
+        approvalBtn.onclick = async () => { const first = ids[0]; if (!first) return;
+          try { const r = await mcp.callTool(CCR, "get_session", {session_id:first}); apply(first, r); liveIssue = ""; liveSummary(); render(); }
+          catch(e){ liveIssue = e && e.code === "approval_required" ? "approval_required" : "not_allowed"; liveSummary(); } };
+        $("live").append(approvalBtn); }
+      return;
+    }
+    if (!ids.length) return setLive("Live thread status: no thread on the board has a session id yet; colors come from the last card update.", false);
+    setLive("Live thread status on for " + got + " of " + ids.length + " threads. Others show the last card update." + (got < ids.length && lastNote ? " Last problem: " + lastNote + "." : ""), got > 0);
+  }
+  function record(result){
+    const tryParse = x => { if (typeof x !== "string") return x; try { return JSON.parse(x); } catch(e){ const m = x.match(/\{[\s\S]*\}/); if (m) try { return JSON.parse(m[0]); } catch(e2){} } return null; };
+    const cands = [result && result.payload, result && result.structuredContent];
+    (result && result.content || []).forEach(c => { if (c && c.type === "text") cands.push(c.text); });
+    for (let c of cands){ c = tryParse(c); if (!c || typeof c !== "object") continue;
+      for (const r of [c, c.ccr, c.session, c.data]) if (r && typeof r === "object" && (r.status_bucket || r.session_status)) return r; }
+    return null;
+  }
+  let lastNote = "";
+  function apply(id, result){
+    const s = record(result);
+    if (!s){ lastNote = "unexpected reply shape"; return; }
+    const b = String(s.status_bucket || "").replace(/^SESSION_STATUS_BUCKET_/i, "").toUpperCase();
+    let key = BUCKET[b] || "";
+    if (/ARCHIVED/i.test(String(s.session_status || ""))) key = "idle";
+    if (!key){ lastNote = "unknown status " + (s.status_bucket || s.session_status || "none"); return; }
+    const pts = s.post_turn_summary || (s.external_metadata && s.external_metadata.post_turn_summary) || {};
+    const note = key === "waiting" ? (pts.needs_action || pts.status_detail || "") : (pts.status_detail || "");
+    live[id] = {key, note: typeof note === "string" ? note : ""};
+  }
+  function watch(id){
+    if (watches[id] || !mcp) return;
+    watches[id] = mcp.watchTool(CCR, "get_session", {session_id:id}, ev => {
+      if (ev.type === "data"){ apply(id, ev.result); if (liveIssue === "approval_required") liveIssue = ""; }
+      else { const code = ev.error && ev.error.code; lastNote = "error " + (code || "unknown");
+        if (["needs_reauth","server_not_connected","selection_required","blocked_by_policy","not_in_manifest","approval_required","not_granted","capability_disabled","capability_removed"].includes(code)){
+          delete live[id];
+          liveIssue = code === "approval_required" ? "approval_required" : code === "needs_reauth" ? "needs_reauth" : code === "server_not_connected" || code === "selection_required" ? "server_not_connected" : "not_allowed";
+        }
+      }
+      liveSummary(); render();
+    }, {refetchInterval: 30000});
+  }
+  function syncWatches(){
+    if (!mcp) return;
+    const want = new Set(); projects.forEach(p => arr(p.threads).forEach(t => { const i = sid(t); if (i) want.add(i); }));
+    want.forEach(watch);
+    Object.keys(watches).forEach(i => { if (!want.has(i)){ watches[i](); delete watches[i]; delete live[i]; } });
+    liveSummary();
+  }
+
+  $("copyBtn").onclick = async () => {
+    if (!instruction){ $("copyBtn").textContent = "Not loaded yet"; setTimeout(() => $("copyBtn").textContent = "Copy Claude instruction", 1600); return; }
+    try { await navigator.clipboard.writeText(instruction); $("copyBtn").textContent = "Copied"; setTimeout(() => $("copyBtn").textContent = "Copy Claude instruction", 1600); }
+    catch(e){ const pre = $("promptText"); pre.textContent = instruction; pre.hidden = false; const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+  };
+
+  (async function start(){
+    claude.use("mcp").then(m => { mcp = m;
+      if (!mcp) $("live").hidden = true;
+      else syncWatches(); });
+    const db = await claude.use("db");
+    if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
+    db.collection("projects").onSnapshot(snap => {
+      projects = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()));
+      // Threads still on the old rule write only the card's status; color those threads from it.
+      projects.forEach(p => { if (p.status) p.threads = arr(p.threads).map(t => t && !t.status ? Object.assign({}, t, {status:p.status, at:t.at || p.updated}) : t); });
+      syncWatches(); render();
+    }, err => { $("board").replaceChildren(el("div",{class:"empty",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload the page to try again."})); });
+    db.doc("meta/instruction").onSnapshot(s => {
+      const d = s.exists ? s.data() : null;
+      instruction = d && typeof d.text === "string" ? d.text : "";
+      if (!$("promptText").hidden) $("promptText").textContent = instruction;
+    }, () => {});
+    setInterval(() => { if (projects.length) render(); }, 60000);
+  })();
+})();
+</script>

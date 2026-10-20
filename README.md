@@ -32,3 +32,7 @@ claude plugin install status-board --marketplace zwdzwd/status-board-mod
 ```
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `zwdzwd/status-board-mod`, then Add plugin.
+
+## The board page
+
+`board/project-board.html` is the source of the Status Board artifact (https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF). The plugin does not load it; it is kept here so the page has a history and a copy outside claude.ai. To change the board, edit this file and publish it to the same artifact URL (capabilities `db` and `user`).
