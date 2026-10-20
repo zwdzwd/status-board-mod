@@ -190,6 +190,84 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean): Pr
   return run
 }
 
+// ---- Coordinator: reconcile the card's thread list with the project's threads, as code ----
+type ProjThread = { ids: string[]; name: string; open: boolean }
+
+// Pull thread-like records out of whatever the listing tool returns (JSON text, nested lists).
+function harvest(v: unknown, out: ProjThread[], depth = 0): void {
+  if (!v || depth > 6) return
+  if (Array.isArray(v)) { v.forEach(x => harvest(x, out, depth + 1)); return }
+  if (typeof v === 'string') { try { harvest(JSON.parse(v), out, depth + 1) } catch {} return }
+  if (typeof v !== 'object') return
+  const o = v as Record<string, unknown>
+  const idKeys = ['thread_id', 'threadId', 'id', 'session_id', 'sessionId', 'cmsg_id', 'message_id']
+  const ids = idKeys.map(k => o[k]).filter(x => typeof x === 'string' && x.length > 6) as string[]
+  const name = ['name', 'title', 'label', 'thread_name'].map(k => o[k]).find(x => typeof x === 'string' && x.trim()) as string | undefined
+  const st = ['status', 'state', 'thread_status', 'session_status', 'resolution'].map(k => o[k]).find(x => typeof x === 'string') as string | undefined
+  const flag = ['resolved', 'is_resolved', 'archived', 'is_archived', 'closed'].some(k => o[k] === true)
+  if (ids.length && name) {
+    const open = !flag && !/resolved|archived|closed|deleted/i.test(st || '')
+    out.push({ ids, name: name.trim(), open })
+  }
+  for (const k of Object.keys(o)) { const x = o[k]; if (x && typeof x === 'object') harvest(x, out, depth + 1) }
+}
+
+async function projectThreads($: Engine): Promise<ProjThread[] | null> {
+  let tools: string[] = []
+  try { tools = (await $.tool.list()).map(t => t.name) } catch { return null }
+  const name = tools.find(n => /(^|__)list_thread_sessions$/.test(n)) || tools.find(n => /list_thread/i.test(n))
+  if (!name) return null
+  const r = await Promise.race([
+    $.tool.call({ tool: name } as any),
+    $.clock.sleep(20000).then(() => { throw new Error('thread listing timed out') }),
+  ])
+  if (r.deny !== undefined || r.isError) return null
+  const out: ProjThread[] = []
+  harvest(r.result, out); if (!out.length) harvest(r.text, out)
+  // one record per thread: merge duplicates by shared id
+  const merged: ProjThread[] = []
+  for (const t of out) { const m = merged.find(x => x.ids.some(i => t.ids.includes(i))); if (m) { m.ids = [...new Set([...m.ids, ...t.ids])]; m.open = m.open && t.open } else merged.push(t) }
+  return merged.length ? merged : null
+}
+
+const threadIdOf = (t: Thread) => { const m = /[?&]thread=([A-Za-z0-9_]+)/.exec(String(t.url || '')); return m ? m[1] : '' }
+const sameId = (a: string, b: string) => { const x = norm(a), y = norm(b); return !!x && !!y && (x === y || x.endsWith(y) || y.endsWith(x)) }
+
+async function syncThreadList($: Engine, cardId: string): Promise<string> {
+  const list = await projectThreads($)
+  if (!list) return 'no thread list'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]
+    if (!card) return 'no card'
+    const before = threadsOf(card)
+    const matchOf = (t: Thread) => list.find(p => p.ids.some(i => sameId(i, threadIdOf(t)) || sameId(i, String(t.session || ''))) ) || list.find(p => p.name.toLowerCase() === String(t.label || '').toLowerCase())
+    const kept: Thread[] = []
+    const used = new Set<ProjThread>()
+    for (const t of before) {
+      if (!t) continue
+      const m = matchOf(t)
+      if (!m) continue                       // not a thread the project knows: resolved, archived or gone
+      if (!m.open) continue                  // resolved
+      if (used.has(m)) continue              // a duplicate entry for the same thread
+      used.add(m)
+      kept.push(m.name && m.name !== t.label ? { ...t, label: m.name } : t)
+    }
+    const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
+    for (const p of list) {
+      if (!p.open || used.has(p)) continue
+      const tid = p.ids.find(i => /^cmsg_/.test(i)) || ''
+      kept.push({ label: p.name, url: base && tid ? `${base}?thread=${tid}` : undefined, session: p.ids.find(i => /^(cse|session)_/.test(i)) })
+    }
+    const changed = JSON.stringify(kept) !== JSON.stringify(before)
+    if (!changed) return 'in sync'
+    try {
+      await call($, { action: 'update', collection: 'projects', doc_id: cardId, if_version: card.version, data: { threads: kept } })
+      return `synced: ${kept.length} open thread${kept.length === 1 ? '' : 's'}`
+    } catch (err) { if (!/version/i.test(String(err))) throw err }
+  }
+  return 'retry later'
+}
+
 function describe(): string {
   if (coordinator) return `This session is the project conversation for the ${coordinator.name} card; it keeps the card's thread list and has no thread entry of its own.`
   return found
@@ -199,7 +277,7 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
-  if (coordinator) return `Status Board mod: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}), so the mod tracks no thread for it. You own the card's thread list: on every turn where a thread was created, renamed, resolved or reopened, read the card and make its threads match the project's open threads (remove resolved ones, add new ones with label and url, fix labels), keeping the other fields of entries that stay. Never add an entry for yourself.`
+  if (coordinator) return `Status Board mod: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.`
   if (found && registeredHere) return `Status Board mod: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
   return `Status Board mod: active, but it could not match this session to a card on the board. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
@@ -234,7 +312,7 @@ export const register: Register = on => {
     void (async () => {
       try {
         found = await indexLookup($)
-        if (coordinator) { $.ui.status(`board: coordinator of ${coordinator.name}`); $.ui.invalidate('prompt.section'); return }
+        if (coordinator) { const co = coordinator; $.ui.invalidate('prompt.section'); try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return }
         if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
         if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
         else $.ui.status('board: project not matched; the thread registers itself on its first turn')
@@ -295,10 +373,10 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
-    if (coordinator) return out
+    if (coordinator) { const co = coordinator; try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return out }
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
       try { const f = await locate($); const co = coordinator as { cardId: string; name: string } | null
-        if (co) { $.ui.invalidate('prompt.section'); $.ui.status(`board: coordinator of ${co.name}`); return out }
+        if (co) { $.ui.invalidate('prompt.section'); try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch {} return out }
         if (f) { found = f; registeredHere = false; void indexWrite($, f); $.ui.invalidate('prompt.section'); $.ui.status(`board: ${f.name} / ${f.label}`) } } catch {}
       if (!found) return out
     }

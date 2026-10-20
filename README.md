@@ -11,7 +11,7 @@ In any Claude Code thread, the mod:
 - adds one line to the system prompt naming this session's id and what it did, so the thread's Claude keeps the entry right;
 - adds a `/board` command that says which card and thread the chat updates.
 
-It writes only its own thread's entry. In a project's coordinating conversation (index record role "coordinator") it tracks no thread and instead asks that session to keep the card's thread list in sync with the project's open threads.
+It writes only its own thread's entry. In a project's coordinating conversation (index record role "coordinator") it tracks no thread; instead, at the end of every turn, it calls the project's `list_thread_sessions` tool and reconciles the card's thread list with it in code: resolved threads removed, new ones added, names taken from the list.
 
 The board's link is the `BOARD` constant at the top of `hooks/register.ts`.
 
