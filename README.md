@@ -64,16 +64,24 @@ After each release (a new `VERSION`):
 - The board page and rules are updated by publishing / writing them back; readers see
   them at once.
 
+## Tests
+
+`test/` drives the plugin through simulated sessions (start, turns, long commands, `/clear`,
+exit, project conversations) against an in-memory board that answers like ArtifactData:
+
+    npm i --no-save typescript && node test/tests.mjs
+
 ## Releasing
 
-Bump the version in the five places listed at the top, commit, push, then follow
+Bump the version in the five places listed at the top, run the tests, commit, push, then follow
 "Updating".
 
 ## How it fits together
 
 - Card = one document in `projects/<id>` on the board: name, repo, category, status,
   summary, next, blocker, threads[], coordinator, updated.
-- Thread entry = `{label, url, session, transcript, status, at, job, ended?}`. The thread's
+- Thread entry = `{label, url, session, transcript, status, at, job, ended?}`: `session` is the
+  remote session id (`cse_…`) the project's tools use, `transcript` the CLI session id. The thread's
   own session writes its status; the coordinator keeps the list in step with the
   project's open threads; resolved threads disappear by themselves. Resolve threads
   rather than delete them.
