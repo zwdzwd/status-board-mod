@@ -138,7 +138,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.8";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.9";   // one version for board, mod and rules; bump all three together
   let projects = [], instruction = "";
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);

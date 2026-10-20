@@ -46,7 +46,11 @@ function parseDocs(text: string): Card[] {
   return out
 }
 
+let lastError = ''   // the last failed board call, shown in the note when the mod could not do its work
 async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
+  try { return await callRaw($, args, ms) } catch (err) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${String(err).slice(0, 160)}`; throw err }
+}
+async function callRaw($: Engine, args: Record<string, unknown>, ms = 15000): Promise<string> {
   const r = await Promise.race([
     $.tool.call({ tool: 'ArtifactData', url: BOARD, ...args } as any),
     $.clock.sleep(ms).then(() => { throw new Error('board call timed out') }),
@@ -213,7 +217,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.7.8'
+const VERSION = '0.7.9'
 
 // The project conversation is the one session that has the thread-listing tool. The tool list
 // handed to a mod does not always include it, so when the list has no such name the mod tries
@@ -380,7 +384,7 @@ function boardNote(): string {
   if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.${coordinatorProblem ? ` Note: the mod could not write its session record (${coordinatorProblem}); tell the user this in one line of your next reply.` : ''}`
   if (found && registeredHere) return `Status Board mod v${VERSION}: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod v${VERSION}: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board (no card's repo or name matches this repository or folder, and no thread entry carries this session's id). Do not stay silent about this: tell the user in one line of your next reply. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
+  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board (${lastError ? 'its board call failed: ' + lastError : 'no card\'s repo or name matches this repository or folder, and no thread entry carries this session\'s id'}; thread-listing tool: ${listTool === null ? 'not probed yet' : listTool || 'none'}; ${toolNames.length} tools listed). Do not stay silent about this: tell the user in one line of your next reply, including the reason in parentheses above. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
@@ -427,7 +431,9 @@ export const register: Register = on => {
           void diag($, 'no match', JSON.stringify({ listTool, repo, root, cwd, tools: toolNames.slice(0, 80) }).slice(0, 6000))
         }
       } catch (err) {
+        if (!lastError) lastError = 'init: ' + String(err).slice(0, 160)
         $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
+        $.ui.invalidate('prompt.section')
       }
     })()
     return next(e)
