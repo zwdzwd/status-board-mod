@@ -29,11 +29,20 @@ Everything is a one-time step per place; nothing is done per session.
    A project conversation that is already open picks it up after
    Project settings → Restart Claude.
 
-2. **Each computer that runs `claude rc` (Remote Control sessions).**
+2. **Each computer that runs `claude rc` (Remote Control sessions).** Once per machine:
 
-       claude plugin install status-board --marketplace zwdzwd/status-board-mod
+       claude plugin marketplace add zwdzwd/status-board-mod
+       claude plugin install status-board@status-board
 
-   Every `claude rc` started on that machine afterwards has the plugin.
+   (`status-board` is the marketplace's own name.) Every `claude rc` started on that
+   machine afterwards has the plugin. A repo can also declare it in
+   `.claude/settings.json` so it stays enabled for sessions started there:
+
+       { "extraKnownMarketplaces": { "status-board": { "source": { "source": "github", "repo": "zwdzwd/status-board-mod" } } },
+         "enabledPlugins": { "status-board@status-board": true } }
+
+   `claude rc` starts sessions without the interactive install prompt, so the plugin
+   still has to be installed once with the two commands above.
 
 3. **Pin the board.** Open the artifact link above once and pin it to the sidebar.
 
