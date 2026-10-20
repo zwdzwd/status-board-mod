@@ -213,7 +213,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.6'
+const VERSION = '0.6.7'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -325,6 +325,27 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
   return 'retry later'
 }
 
+// The coordinator's own status lives in the card's `coordinator` field (the board shows it as a
+// stripe on the card's edge); it is not a thread entry. Pinned write, one retry on a concurrent edit.
+let coordBusy: Promise<void> = Promise.resolve()
+function setCoordStatus($: Engine, status: string, ended?: boolean): Promise<void> {
+  const run = coordBusy.then(async () => {
+    const co = coordinator; if (!co || !co.cardId) return
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: co.cardId }))[0]
+      if (!card) return
+      const prev = (card.data.coordinator && typeof card.data.coordinator === 'object') ? card.data.coordinator as Record<string, unknown> : {}
+      const now = new Date().toISOString()
+      const rec: Record<string, unknown> = { ...prev, status, at: now, transcript: sessionId }
+      if (ended === true) rec.ended = now; else delete rec.ended
+      try { await call($, { action: 'update', collection: 'projects', doc_id: co.cardId, if_version: card.version, data: { coordinator: rec } }); return }
+      catch (err) { if (!/version/i.test(String(err))) throw err }
+    }
+  }).catch((err: unknown) => { $.ui.status(`board: coordinator status write failed (${String(err).slice(0, 60)})`) })
+  coordBusy = run
+  return run
+}
+
 function describe(): string {
   if (coordinator) return `Status Board mod v${VERSION}. This session is the project conversation for the ${coordinator.name} card; it keeps the card's thread list and has no thread entry of its own.`
   return found
@@ -374,7 +395,7 @@ export const register: Register = on => {
     void (async () => {
       try {
         await detectCoordinator($)
-        if (coordinator) { const co = coordinator; $.ui.invalidate('prompt.section'); if (!co.cardId) { $.ui.status('board: coordinator, card not matched yet'); return } try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return }
+        if (coordinator) { const co = coordinator; $.ui.invalidate('prompt.section'); if (!co.cardId) { $.ui.status('board: coordinator, card not matched yet'); return } try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } void setCoordStatus($, 'idle', false); return }
         found = await indexLookup($)
         if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
         if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
@@ -390,6 +411,7 @@ export const register: Register = on => {
   // The board hides an ended entry an hour later unless the thread is reopened, which clears the stamp.
   // One write, pinned to the last version seen, since this hook runs under a short time bound.
   on('session.end', async ($, e, next) => {
+    if (coordinator && coordinator.cardId) { try { await Promise.race([setCoordStatus($, 'idle', true), $.clock.sleep(4000)]) } catch {} }
     if (found && lastCard) {
       const now = new Date().toISOString()
       const th = threadsOf(lastCard).map(t => (t && mine(t)) ? { ...t, status: 'idle', at: now, ended: now } : t)
@@ -430,6 +452,7 @@ export const register: Register = on => {
   // Main-loop turns only: thinking at the start; waiting on you / idle (+ job) at the end.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined && found) void setStatus($, 'thinking')
+    if (e.agentId === undefined && coordinator && coordinator.cardId) void setCoordStatus($, 'thinking')
     return next(e)
   })
 
@@ -438,7 +461,10 @@ export const register: Register = on => {
     if (e.agentId !== undefined) return out
     if (!coordinator && !found) { try { await detectCoordinator($) } catch {} }
     if (coordinator) { let co = coordinator; if (!co.cardId) { await detectCoordinator($); co = coordinator || co; if (!co.cardId) return out; $.ui.invalidate('prompt.section') }
-      try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return out }
+      try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) }
+      const cd = e.isAborted ? { status: 'idle' } : await decide($, e.answer || '')
+      void setCoordStatus($, cd.status)
+      return out }
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
       try { const f = await locate($); const co = coordinator as { cardId: string; name: string } | null
         if (co) { $.ui.invalidate('prompt.section'); try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch {} return out }

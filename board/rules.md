@@ -109,6 +109,10 @@ finishes.
     it). A thread writes only its own entry; the coordinator maintains
     the list. No montage, artifact, repo, Zenodo or other links
     anywhere on the card: remove a links or montage field if present.
+  - coordinator: {status, at, transcript, ended?} — the project
+    conversation's own status, written by the mod only (the board shows
+    it as the stripe on the card's left edge). Never write or remove it;
+    when you update the card, leave this field as it is.
   - category: paper | software | grant | talk | personal. It picks the
     board section. Set it only when creating the card (ask me if
     unclear); never change it afterwards.
