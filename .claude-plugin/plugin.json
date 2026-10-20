@@ -1,1 +1,1 @@
-{ "name": "status-board", "version": "0.6.1", "description": "Keeps this thread's status (thinking / waiting on you / idle) current on the Status Board, automatically, at the start and end of every turn." }
+{ "name": "status-board", "version": "0.6.2", "description": "Keeps this thread's status (thinking / waiting on you / idle) current on the Status Board, automatically, at the start and end of every turn." }

@@ -212,7 +212,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && typeof x === 'object') harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.1'
+const VERSION = '0.6.2'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -247,6 +247,16 @@ async function detectCoordinator($: Engine): Promise<void> {
   } catch {}
 }
 
+// A diagnostic the board's owner can read: what the thread listing looked like when it could not be used.
+async function diag($: Engine, what: string, sample: string): Promise<void> {
+  try {
+    const d = parseDocs(await call($, { action: 'get', collection: 'diagnostics', doc_id: sessionId }))[0]
+    const args: Record<string, unknown> = { action: 'set', collection: 'diagnostics', doc_id: sessionId, data: { what, sample, version: VERSION, at: new Date().toISOString() } }
+    if (d) args.if_version = d.version
+    await call($, args)
+  } catch {}
+}
+
 async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   const name = await listToolName($)
   if (!name) return null
@@ -254,9 +264,10 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
     $.tool.call({ tool: name } as any),
     $.clock.sleep(20000).then(() => { throw new Error('thread listing timed out') }),
   ])
-  if (r.deny !== undefined || r.isError) return null
+  if (r.deny !== undefined || r.isError) { void diag($, 'listing failed', String(r.deny ?? r.text ?? '').slice(0, 1500)); return null }
   const out: ProjThread[] = []
   harvest(r.result, out); if (!out.length) harvest(r.text, out)
+  if (!out.length) void diag($, 'listing not understood', JSON.stringify({ text: String(r.text ?? '').slice(0, 3000), result: r.result }).slice(0, 6000))
   // one record per thread: merge duplicates by shared id
   const merged: ProjThread[] = []
   for (const t of out) { const m = merged.find(x => x.ids.some(i => t.ids.includes(i))); if (m) { m.ids = [...new Set([...m.ids, ...t.ids])]; m.open = m.open && t.open } else merged.push(t) }
