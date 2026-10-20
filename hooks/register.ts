@@ -75,14 +75,14 @@ async function indexLookup($: Engine): Promise<Found | null> {
     if (!cardId) return null
     const card = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]
     if (!card) return null
-    if (d.data.role === 'coordinator') { coordinator = { cardId, name: String(card.data.name ?? cardId) }; return null }
+    if (d.data.role === 'coordinator') return null
     return findIn([card])
   } catch { return null }
 }
 async function indexWrite($: Engine, f: Found): Promise<void> {
   try {
     const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
-    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: f.cardId, label: f.label, at: new Date().toISOString() } }
+    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: f.cardId, label: f.label, version: VERSION, at: new Date().toISOString() } }
     if (d) args.if_version = d.version
     await call($, args)
   } catch {}
@@ -212,10 +212,43 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && typeof x === 'object') harvest(x, out, depth + 1) }
 }
 
+const VERSION = '0.6.1'
+
+// The project conversation is the one session that has the thread-listing tool.
+async function listToolName($: Engine): Promise<string> {
+  try { const tools = (await $.tool.list()).map(t => t.name); return tools.find(n => /(^|__)list_thread_sessions$/.test(n)) || tools.find(n => /list_thread/i.test(n)) || '' } catch { return '' }
+}
+
+// A coordinator's card: the one whose thread entries carry this project's thread or session ids;
+// else the index record; else nothing (the note then asks the model to write the record once).
+async function detectCoordinator($: Engine): Promise<void> {
+  const tool = await listToolName($)
+  if (!tool) return
+  let cardId = '', name = ''
+  const list = await projectThreads($)
+  if (list) {
+    const ids = list.flatMap(p => p.ids)
+    for (const c of await cards($)) {
+      if (threadsOf(c).some(t => t && ids.some(i => sameId(i, threadIdOf(t)) || sameId(i, String(t.session || ''))))) { cardId = c.id; name = String(c.data.name ?? c.id); break }
+    }
+  }
+  if (!cardId) {
+    try {
+      const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
+      if (d && typeof d.data.card === 'string') { cardId = d.data.card; const c = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]; name = c ? String(c.data.name ?? cardId) : cardId }
+    } catch {}
+  }
+  coordinator = cardId ? { cardId, name } : { cardId: '', name: '' }
+  try {
+    const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
+    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: cardId, role: 'coordinator', version: VERSION, tool, at: new Date().toISOString() } }
+    if (d) args.if_version = d.version
+    await call($, args)
+  } catch {}
+}
+
 async function projectThreads($: Engine): Promise<ProjThread[] | null> {
-  let tools: string[] = []
-  try { tools = (await $.tool.list()).map(t => t.name) } catch { return null }
-  const name = tools.find(n => /(^|__)list_thread_sessions$/.test(n)) || tools.find(n => /list_thread/i.test(n))
+  const name = await listToolName($)
   if (!name) return null
   const r = await Promise.race([
     $.tool.call({ tool: name } as any),
@@ -277,6 +310,7 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
+  if (coordinator && !coordinator.cardId) return `Status Board mod: active. This session is a project conversation (coordinator), but no card on the board matches this project's threads yet. Once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
   if (coordinator) return `Status Board mod: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.`
   if (found && registeredHere) return `Status Board mod: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
@@ -311,8 +345,9 @@ export const register: Register = on => {
     // Board work runs in the background: it must never hold up the session's start.
     void (async () => {
       try {
+        await detectCoordinator($)
+        if (coordinator) { const co = coordinator; $.ui.invalidate('prompt.section'); if (!co.cardId) { $.ui.status('board: coordinator, card not matched yet'); return } try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return }
         found = await indexLookup($)
-        if (coordinator) { const co = coordinator; $.ui.invalidate('prompt.section'); try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return }
         if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
         if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
         else $.ui.status('board: project not matched; the thread registers itself on its first turn')
@@ -373,7 +408,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
-    if (coordinator) { const co = coordinator; try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return out }
+    if (coordinator) { let co = coordinator; if (!co.cardId) { await detectCoordinator($); co = coordinator || co; if (!co.cardId) return out; $.ui.invalidate('prompt.section') }
+      try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return out }
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
       try { const f = await locate($); const co = coordinator as { cardId: string; name: string } | null
         if (co) { $.ui.invalidate('prompt.section'); try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch {} return out }
