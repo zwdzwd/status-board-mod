@@ -62,7 +62,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .line.sum{-webkit-line-clamp:2}
 .line b{font-weight:700;font-size:10px;color:var(--muted);margin-right:4px}
 .line.next,.line.next b{color:var(--ok)}
-.line.bad,.line.bad b{color:var(--warn)}
+.line.bad,.line.bad b{color:var(--bad)}
+.card.open{background:var(--idle-soft);border-color:var(--accent)}
 .stripe{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--line)}
 .stripe.c-thinking{background:var(--think)} .stripe.c-working{background:var(--ok)} .stripe.c-waiting{background:var(--warn)} .stripe.c-idle{background:var(--idle)}
 .stripe.c-thinking,.stripe.c-working{animation:pulse 1.6s ease-in-out infinite}
@@ -92,7 +93,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip h4{font-family:var(--f-display);font-size:16px;margin:0}
 #tip p{margin:0;overflow-wrap:anywhere}
 #tip b{display:block;font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-#tip .bad,#tip .bad b{color:var(--warn)} #tip .next,#tip .next b{color:var(--ok)}
+#tip .bad,#tip .bad b{color:var(--bad)} #tip .next,#tip .next b{color:var(--ok)}
 #tip .meta{margin:0}
 [hidden]{display:none!important}
 #promptText{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow-x:auto}
@@ -137,7 +138,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.6";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.7";   // one version for board, mod and rules; bump all three together
   let projects = [], instruction = "";
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
@@ -243,8 +244,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     y = Math.min(Math.max(g, y), Math.max(g, H - th - g));
     t.style.left = x + "px"; t.style.top = y + "px";
   }
-  function showTip(card, p){ clearTimeout(tipTimer); tipFor = card; fillTip(p); placeTip(card); }
-  function hideTip(){ clearTimeout(tipTimer); tipFor = null; $("tip").hidden = true; }
+  function showTip(card, p){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = card; card.classList.add("open"); fillTip(p); placeTip(card); }
+  function hideTip(){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = null; $("tip").hidden = true; }
   // Click a card (not a button) to open its full text; click it again, click elsewhere, or press Esc to close.
   function hookTip(c, p){
     c.addEventListener("click", e => { if (e.target.closest("a,button")) return; if (tipFor === c && !$("tip").hidden) hideTip(); else showTip(c, p); });
