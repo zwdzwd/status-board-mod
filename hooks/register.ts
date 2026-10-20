@@ -19,6 +19,7 @@ let found: Found | null = null
 let lastWrite = ''
 let registeredHere = false     // this session added its own entry (label and url still to be filled by the thread)
 let coordinator: { cardId: string; name: string } | null = null   // this session is a project conversation, not a thread
+let coordinatorProblem = ''   // why the coordinator could not be tied to a card (or write its record); shown to the model so it tells the user
 let busy: Promise<void> = Promise.resolve()
 let lastCard: Card | null = null      // the card as last read or written, for the one-call write at session end
 
@@ -212,7 +213,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.5'
+const VERSION = '0.6.6'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -224,32 +225,39 @@ async function listToolName($: Engine): Promise<string> {
 async function detectCoordinator($: Engine): Promise<void> {
   const tool = await listToolName($)
   if (!tool) return
-  let cardId = '', name = '', cardsSeen = -1
+  let cardId = '', name = '', cardsSeen = -1, how = ''
   const list = await projectThreads($)
+  let all: Card[] = []
+  try { all = await cards($) } catch (err) { void diag($, 'cards failed', String(err).slice(0, 500)) }
+  cardsSeen = all.length
   if (list) {
     const ids = list.flatMap(p => p.ids)
-    let all: Card[] = []
-    try { all = await cards($) } catch (err) { void diag($, 'cards failed', String(err).slice(0, 500)) }
-    cardsSeen = all.length
     for (const c of all) {
-      if (threadsOf(c).some(t => t && ids.some(i => sameId(i, threadIdOf(t)) || sameId(i, String(t.session || ''))))) { cardId = c.id; name = String(c.data.name ?? c.id); break }
+      if (threadsOf(c).some(t => t && ids.some(i => sameId(i, threadIdOf(t)) || sameId(i, String(t.session || ''))))) { cardId = c.id; name = String(c.data.name ?? c.id); how = 'thread ids'; break }
     }
+  }
+  // No card carries this project's threads yet: fall back to the card named like the project
+  // (its repo, remote or folder name), so a fresh project still lands on its card.
+  if (!cardId && all.length) {
+    try { const g = await guessCard($, all); if (g) { cardId = g.id; name = String(g.data.name ?? g.id); how = 'project name' } } catch {}
   }
   if (!cardId) {
     try {
       const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
-      if (d && typeof d.data.card === 'string') { cardId = d.data.card; const c = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]; name = c ? String(c.data.name ?? cardId) : cardId }
+      if (d && typeof d.data.card === 'string') { cardId = d.data.card; how = 'index record'; const c = parseDocs(await call($, { action: 'get', collection: 'projects', doc_id: cardId }))[0]; name = c ? String(c.data.name ?? cardId) : cardId }
     } catch {}
   }
   coordinator = cardId ? { cardId, name } : { cardId: '', name: '' }
   let note = ''
   try {
     const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
-    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: cardId, role: 'coordinator', version: VERSION, tool, at: new Date().toISOString() } }
+    const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: cardId, role: 'coordinator', version: VERSION, tool, matched: how, at: new Date().toISOString() } }
     if (d) args.if_version = d.version
     await call($, args)
   } catch (err) { note = 'record write failed: ' + String(err).slice(0, 200) }
-  if (!cardId || note) void diag($, 'coordinator detection', JSON.stringify({ tool, listed: list ? list.map(p => ({ name: p.name, ids: p.ids, open: p.open })) : null, cardsSeen, cardId, note }).slice(0, 6000))
+  if (!cardId) coordinatorProblem = `no card matched: ${list ? list.length + ' thread(s) listed' : 'thread listing unreadable'}, ${cardsSeen < 0 ? 'board unreadable' : cardsSeen + ' cards read'}, no card named like this project${note ? '; ' + note : ''}`
+  else coordinatorProblem = note
+  if (!cardId || note) void diag($, 'coordinator detection', JSON.stringify({ tool, listed: list ? list.map(p => ({ name: p.name, ids: p.ids, open: p.open })) : null, cardsSeen, cardId, how, note }).slice(0, 6000))
 }
 
 // A diagnostic the board's owner can read: what the thread listing looked like when it could not be used.
@@ -326,11 +334,11 @@ function describe(): string {
 
 // The thread's own Claude writes the rest of the card, so tell it what the mod did and needs.
 function boardNote(): string {
-  if (coordinator && !coordinator.cardId) return `Status Board mod v${VERSION}: active. This session is a project conversation (coordinator), but no card on the board matches this project's threads yet. Once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
-  if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.`
+  if (coordinator && !coordinator.cardId) return `Status Board mod v${VERSION}: active. This session is a project conversation (coordinator), but the mod could not tie it to a card (${coordinatorProblem || 'no card matches this project\'s threads or name'}). Do not stay silent about this: in your next reply, tell the user in one line that the Status Board mod could not find this project's card and why. Then, once, before other work: find or create this project's card by the rules (meta/instruction, field rules) and write sessions/${sessionId} = {card: <card id>, role: "coordinator"}; the mod then keeps the card's thread list in sync by itself. Never add a thread entry for yourself.`
+  if (coordinator) return `Status Board mod v${VERSION}: active. This session is the project conversation (coordinator) for the ${coordinator.name} card (id ${coordinator.cardId}). The mod syncs the card's thread list with list_thread_sessions by itself at the end of every turn (resolved threads removed, new ones added, names taken from the list), so you need not touch the thread list. Never add an entry for yourself.${coordinatorProblem ? ` Note: the mod could not write its session record (${coordinatorProblem}); tell the user this in one line of your next reply.` : ''}`
   if (found && registeredHere) return `Status Board mod v${VERSION}: active. It added this chat to the ${found.name} card (id ${found.cardId}) as a thread entry with transcript ${sessionId} and the placeholder label "New thread". On your first turn in this session, before other work, read the board's rules (meta/instruction, field rules) and fix that entry: set label to this thread's name as the project's thread list shows it and url to this thread's link, keeping transcript as is; touch nothing else. The mod writes this thread's status and job by itself from then on.`
   if (found) return `Status Board mod v${VERSION}: active. This chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes this thread's status (thinking / waiting_on_you / idle) and job by itself; when you update the card, keep this thread's entry's transcript field as ${sessionId}.`
-  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
+  return `Status Board mod v${VERSION}: active, but it could not match this session to a card on the board (no card's repo or name matches this repository or folder, and no thread entry carries this session's id). Do not stay silent about this: tell the user in one line of your next reply. If this session is a project conversation (you start threads for the project), write sessions/${sessionId} = {card: <this project's card id>, role: "coordinator"} and keep the card's thread list in sync as the rules say; add no entry for yourself. If this session is a thread, on your first turn, before other work, read the board's rules (meta/instruction, field rules), find or create this project's card, add this thread's entry with transcript ${sessionId} (plus label, url, session), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so future threads register by themselves. The mod then writes this thread's status by itself.`
 }
 
 // What the reply means for the board: the chat's status, and whether work is still running elsewhere
