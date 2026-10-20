@@ -21,6 +21,7 @@
 body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13px;line-height:1.45}
 .wrap{max-width:1240px;margin:0 auto;padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
 header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.hbtns{display:flex;gap:6px;flex-wrap:wrap}
 h1{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,4vw,30px);line-height:1.1;margin:0}
 .sub{color:var(--muted);font-size:13px;margin:2px 0 0}
 .btn{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;text-decoration:none;white-space:nowrap}
@@ -104,7 +105,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       <h1>Status Board</h1>
       <p class="sub" id="sub">Every project at a glance.</p>
     </div>
-    <button class="btn" id="copyBtn" type="button" title="Copy the text for Settings, Instructions for Claude">Copy Claude instruction</button>
+    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="copyBtn" type="button" title="Copy the text for Settings, Instructions for Claude">Copy Claude instruction</button></div>
   </header>
 
   <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span><span class="s-done"><span class="dot"></span>Done</span><span class="muted">· left stripe = the project conversation</span></div>
@@ -137,7 +138,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.3";   // one version for board, mod and rules; bump all three together
+  const VERSION = "0.7.4";   // one version for board, mod and rules; bump all three together
   let projects = [], instruction = "";
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
