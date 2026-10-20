@@ -1,0 +1,5 @@
+{
+  "name": "status-board",
+  "owner": { "name": "Wanding Zhou" },
+  "plugins": [{ "name": "status-board", "source": "./" }]
+}
