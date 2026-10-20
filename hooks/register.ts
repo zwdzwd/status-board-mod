@@ -195,13 +195,13 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 
 // Pull thread-like records out of whatever the listing tool returns (JSON text, nested lists).
 function harvest(v: unknown, out: ProjThread[], depth = 0): void {
-  if (!v || depth > 6) return
+  if (!v || depth > 8) return
   if (Array.isArray(v)) { v.forEach(x => harvest(x, out, depth + 1)); return }
   if (typeof v === 'string') { try { harvest(JSON.parse(v), out, depth + 1) } catch {} return }
   if (typeof v !== 'object') return
   const o = v as Record<string, unknown>
   const idKeys = ['thread_id', 'threadId', 'id', 'session_id', 'sessionId', 'cmsg_id', 'message_id']
-  const ids = idKeys.map(k => o[k]).filter(x => typeof x === 'string' && x.length > 6) as string[]
+  const ids = idKeys.map(k => o[k]).filter(x => typeof x === 'string' && x.length > 3) as string[]
   const name = ['name', 'title', 'label', 'thread_name'].map(k => o[k]).find(x => typeof x === 'string' && x.trim()) as string | undefined
   const st = ['status', 'state', 'thread_status', 'session_status', 'resolution'].map(k => o[k]).find(x => typeof x === 'string') as string | undefined
   const flag = ['resolved', 'is_resolved', 'archived', 'is_archived', 'closed'].some(k => o[k] === true)
@@ -209,10 +209,10 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
     const open = !flag && !/resolved|archived|closed|deleted/i.test(st || '')
     out.push({ ids, name: name.trim(), open })
   }
-  for (const k of Object.keys(o)) { const x = o[k]; if (x && typeof x === 'object') harvest(x, out, depth + 1) }
+  for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.2'
+const VERSION = '0.6.3'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -346,8 +346,8 @@ async function decide($: Engine, answer: string): Promise<{ status: string; job?
 
 export const register: Register = on => {
   // The board's own calls never need a permission dialog: this plugin's reads and writes of the board are allowed here.
-  on('tool.check', { tool: 'ArtifactData' }, ($, e, next) =>
-    next.origin.plugin === $.plugin.name && (e as any).url === BOARD ? { decision: 'allow' as const } : next(e),
+  on('tool.check', ($, e, next) =>
+    next.origin.plugin === $.plugin.name && (e.tool !== 'ArtifactData' || (e as any).url === BOARD) ? { decision: 'allow' as const } : next(e),
   ).catch(($, e, next) => next.called ? next(e) : { decision: 'deny' as const })
 
   on('session.start', async ($, e, next) => {
@@ -419,6 +419,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
+    if (!coordinator && !found) { try { await detectCoordinator($) } catch {} }
     if (coordinator) { let co = coordinator; if (!co.cardId) { await detectCoordinator($); co = coordinator || co; if (!co.cardId) return out; $.ui.invalidate('prompt.section') }
       try { $.ui.status(`board: coordinator of ${co.name}: ${await syncThreadList($, co.cardId)}`) } catch (err) { $.ui.status(`board: coordinator sync failed (${String(err).slice(0, 50)})`) } return out }
     if (!found || registeredHere) {   // the thread may have registered or relabelled itself during this turn
