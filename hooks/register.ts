@@ -213,11 +213,30 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.7.7'
+const VERSION = '0.7.8'
 
-// The project conversation is the one session that has the thread-listing tool.
+// The project conversation is the one session that has the thread-listing tool. The tool list
+// handed to a mod does not always include it, so when the list has no such name the mod tries
+// the call itself once: a session that can list threads is the coordinator, whatever the list says.
+let listTool: string | null = null      // '' once probed and absent
+let probed: ToolResult | null = null    // the probe's listing, used by the first projectThreads
+let toolNames: string[] = []
+type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown }
 async function listToolName($: Engine): Promise<string> {
-  try { const tools = (await $.tool.list()).map(t => t.name); return tools.find(n => /(^|__)list_thread_sessions$/.test(n)) || tools.find(n => /list_thread/i.test(n)) || '' } catch { return '' }
+  if (listTool !== null) return listTool
+  try { toolNames = (await $.tool.list()).map(t => t.name) } catch { toolNames = [] }
+  let n = toolNames.find(x => /(^|__)list_thread_sessions$/.test(x)) || toolNames.find(x => /list_thread/i.test(x)) || ''
+  if (!n) {
+    try {
+      const r = await Promise.race([
+        $.tool.call({ tool: 'list_thread_sessions' } as any) as Promise<ToolResult>,
+        $.clock.sleep(15000).then(() => { throw new Error('probe timed out') }),
+      ])
+      if (r && r.deny === undefined && !r.isError) { n = 'list_thread_sessions'; probed = r }
+    } catch {}
+  }
+  listTool = n
+  return n
 }
 
 // A coordinator's card: the one whose thread entries carry this project's thread or session ids;
@@ -273,8 +292,10 @@ async function diag($: Engine, what: string, sample: string): Promise<void> {
 async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   const name = await listToolName($)
   if (!name) return null
-  const r = await Promise.race([
-    $.tool.call({ tool: name } as any),
+  let r: ToolResult
+  if (probed) { r = probed; probed = null }
+  else r = await Promise.race([
+    $.tool.call({ tool: name } as any) as Promise<ToolResult>,
     $.clock.sleep(20000).then(() => { throw new Error('thread listing timed out') }),
   ])
   if (r.deny !== undefined || r.isError) { void diag($, 'listing failed', String(r.deny ?? r.text ?? '').slice(0, 1500)); return null }
@@ -399,7 +420,12 @@ export const register: Register = on => {
         found = await indexLookup($)
         if (!found) { const docs = await cards($); found = findIn(docs); if (!found) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) } }
         if (found) { void indexWrite($, found); void setStatus($, 'idle', undefined, false); $.ui.status(`board: ${found.name} / ${found.label}`); $.ui.invalidate('prompt.section') }
-        else $.ui.status('board: project not matched; the thread registers itself on its first turn')
+        else {
+          $.ui.status('board: project not matched; the thread registers itself on its first turn')
+          let repo: unknown = null, root = '', cwd = ''
+          try { repo = await $.session.repo() } catch {} try { root = await $.session.root() } catch {} try { cwd = await $.session.cwd() } catch {}
+          void diag($, 'no match', JSON.stringify({ listTool, repo, root, cwd, tools: toolNames.slice(0, 80) }).slice(0, 6000))
+        }
       } catch (err) {
         $.ui.status(`board: could not read the board (${String(err).slice(0, 60)})`)
       }
