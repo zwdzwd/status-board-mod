@@ -93,7 +93,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip .bad,#tip .bad b{color:var(--bad)} #tip .next,#tip .next b{color:var(--ok)}
 #tip .meta{margin:0}
 [hidden]{display:none!important}
-#promptText{white-space:pre-wrap;font-family:var(--f-mono);font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;margin:0;overflow-x:auto}
 </style>
 
 <div class="wrap">
@@ -102,7 +101,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       <h1>Status Board</h1>
       <p class="sub" id="sub">Every project at a glance.</p>
     </div>
-    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="copyBtn" type="button" title="Copy the text for Settings, Instructions for Claude">Copy Claude instruction</button></div>
+    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a></div>
   </header>
 
   <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
@@ -112,7 +111,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     <div class="empty">Loading projects…</div>
   </div>
 
-  <pre id="promptText" hidden></pre>
   <div id="tip" hidden role="tooltip"></div>
 </div>
 
@@ -135,8 +133,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // A thread session's live bucket, as Claude Code Remote reports it.
   const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
   const CCR = "Claude Code Remote";
-  const VERSION = "0.7.10";   // one version for board, mod and rules; bump all three together
-  let projects = [], instruction = "";
+  const VERSION = "0.7.11";   // one version for board, mod and rules; bump all three together
+  let projects = [];
   let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
@@ -343,12 +341,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     liveSummary();
   }
 
-  $("copyBtn").onclick = async () => {
-    if (!instruction){ $("copyBtn").textContent = "Not loaded yet"; setTimeout(() => $("copyBtn").textContent = "Copy Claude instruction", 1600); return; }
-    try { await navigator.clipboard.writeText(instruction); $("copyBtn").textContent = "Copied"; setTimeout(() => $("copyBtn").textContent = "Copy Claude instruction", 1600); }
-    catch(e){ const pre = $("promptText"); pre.textContent = instruction; pre.hidden = false; const r = document.createRange(); r.selectNodeContents(pre); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
-  };
-
   (async function start(){
     claude.use("mcp").then(m => { mcp = m;
       if (!mcp) $("live").hidden = true;
@@ -361,11 +353,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       projects.forEach(p => { if (p.status) p.threads = arr(p.threads).map(t => t && !t.status ? Object.assign({}, t, {status:p.status, at:t.at || p.updated}) : t); });
       syncWatches(); render();
     }, err => { $("board").replaceChildren(el("div",{class:"empty",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload the page to try again."})); });
-    db.doc("meta/instruction").onSnapshot(s => {
-      const d = s.exists ? s.data() : null;
-      instruction = d && typeof d.text === "string" ? d.text : "";
-      if (!$("promptText").hidden) $("promptText").textContent = instruction;
-    }, () => {});
     setInterval(() => { if (projects.length) render(); }, 60000);
   })();
 })();

@@ -15,9 +15,9 @@ Three parts, one version number (`VERSION`; the same string is in
   artifact (https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF, capabilities `db` and
   `user`). After a change, publish it to that same URL.
 - **The rules** (`board/rules.md`): what every project's Claude reads from the board
-  (`meta/instruction` in the board's database: `text` is the short pointer pasted once
-  into a project's instructions; `rules` is the full text). After a change, write it
-  back there.
+  (`meta/instruction` in the board's database, field `rules`). After a change, write it
+  back there. Nothing needs pasting into a project's own instructions: the plugin's
+  note tells every session to read these rules.
 
 ## Setting up
 
@@ -37,17 +37,12 @@ Everything is a one-time step per place; nothing is done per session.
 
 3. **Pin the board.** Open the artifact link above once and pin it to the sidebar.
 
-4. *(Optional)* **Per project:** the board's "Copy Claude instruction" button gives a
-   one-line pointer to paste into Project settings → Instructions for Claude. The
-   plugin's own note already tells each session to read the rules from the board; the
-   pointer is a fallback for a session that runs without the plugin.
-
 ### A brand-new account (no board yet)
 
 - Publish `board/project-board.html` as an artifact with capabilities `db` and `user`,
   and pin it.
 - Write `board/rules.md` into that artifact's database as `meta/instruction`
-  (fields `text`, `rules`, `version`, `updated`).
+  (fields `rules`, `version`, `updated`).
 - Put the new artifact's URL in `BOARD` at the top of `hooks/register.ts`, commit, push,
   then do steps 1–3 above.
 

@@ -1,18 +1,6 @@
-# Status Board rules (meta/instruction) — v0.7.10
+# Status Board rules (meta/instruction) — v0.7.11
 
-Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: text, rules, version, updated).
-
-## text (pasted once into each project's instructions)
-
-## Status Board
-Inside a Claude project, keep this project's card current on my status
-board: https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF
-Read the current rules from the "rules" field of the board's
-"meta/instruction" record and follow them: they say how thread status
-(thinking / waiting on you / idle) and running jobs are recorded, and
-when the status-board mod does it for you. Outside a project, ignore
-this unless I ask about the board.
-
+Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
 ## rules
 
