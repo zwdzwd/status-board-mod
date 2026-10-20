@@ -212,7 +212,7 @@ function harvest(v: unknown, out: ProjThread[], depth = 0): void {
   for (const k of Object.keys(o)) { const x = o[k]; if (x && (typeof x === 'object' || (typeof x === 'string' && x.length > 20 && /[\[{]/.test(x)))) harvest(x, out, depth + 1) }
 }
 
-const VERSION = '0.6.3'
+const VERSION = '0.6.4'
 
 // The project conversation is the one session that has the thread-listing tool.
 async function listToolName($: Engine): Promise<string> {
@@ -224,11 +224,14 @@ async function listToolName($: Engine): Promise<string> {
 async function detectCoordinator($: Engine): Promise<void> {
   const tool = await listToolName($)
   if (!tool) return
-  let cardId = '', name = ''
+  let cardId = '', name = '', cardsSeen = -1
   const list = await projectThreads($)
   if (list) {
     const ids = list.flatMap(p => p.ids)
-    for (const c of await cards($)) {
+    let all: Card[] = []
+    try { all = await cards($) } catch (err) { void diag($, 'cards failed', String(err).slice(0, 500)) }
+    cardsSeen = all.length
+    for (const c of all) {
       if (threadsOf(c).some(t => t && ids.some(i => sameId(i, threadIdOf(t)) || sameId(i, String(t.session || ''))))) { cardId = c.id; name = String(c.data.name ?? c.id); break }
     }
   }
@@ -239,12 +242,14 @@ async function detectCoordinator($: Engine): Promise<void> {
     } catch {}
   }
   coordinator = cardId ? { cardId, name } : { cardId: '', name: '' }
+  let note = ''
   try {
     const d = parseDocs(await call($, { action: 'get', collection: 'sessions', doc_id: sessionId }))[0]
     const args: Record<string, unknown> = { action: 'set', collection: 'sessions', doc_id: sessionId, data: { card: cardId, role: 'coordinator', version: VERSION, tool, at: new Date().toISOString() } }
     if (d) args.if_version = d.version
     await call($, args)
-  } catch {}
+  } catch (err) { note = 'record write failed: ' + String(err).slice(0, 200) }
+  if (!cardId || note) void diag($, 'coordinator detection', JSON.stringify({ tool, listed: list ? list.map(p => ({ name: p.name, ids: p.ids, open: p.open })) : null, cardsSeen, cardId, note }).slice(0, 6000))
 }
 
 // A diagnostic the board's owner can read: what the thread listing looked like when it could not be used.
@@ -346,9 +351,11 @@ async function decide($: Engine, answer: string): Promise<{ status: string; job?
 
 export const register: Register = on => {
   // The board's own calls never need a permission dialog: this plugin's reads and writes of the board are allowed here.
-  on('tool.check', ($, e, next) =>
-    next.origin.plugin === $.plugin.name && (e.tool !== 'ArtifactData' || (e as any).url === BOARD) ? { decision: 'allow' as const } : next(e),
-  ).catch(($, e, next) => next.called ? next(e) : { decision: 'deny' as const })
+  on('tool.check', ($, e, next) => {
+    const mine = String((next.origin && next.origin.plugin) || '').split('@')[0] === $.plugin.name
+    const ok = mine && (e.tool !== 'ArtifactData' || (e as any).url === BOARD)
+    return ok ? { decision: 'allow' as const } : next(e)
+  }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'board', description: 'Show which Status Board card and thread this chat updates' })
