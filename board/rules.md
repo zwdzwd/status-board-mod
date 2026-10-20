@@ -1,6 +1,6 @@
-# Status Board rules (meta/instruction) — v0.7.2
+# Status Board rules (meta/instruction) — v0.7.3
 
-Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: text, rules, updated).
+Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: text, rules, version, updated).
 
 ## text (pasted once into each project's instructions)
 
@@ -98,9 +98,10 @@ finishes.
   - repo: owner/name of the git remote
   - status: the card's own fallback, same values as a thread's
     (threads decide the color when they have one)
-  - summary: one sentence on where it stands
-  - next: the single next step, one line
-  - blocker: what it is waiting on, one line, or "" if none
+  - summary: one sentence on where it stands, at most 20 words (the
+    card shows two short lines; longer text is cut off)
+  - next: the single next step, at most 12 words
+  - blocker: what it is waiting on, at most 12 words, or "" if none
   - threads: [{label, url, session, transcript, status, at, job}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
