@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.11.3
+# Status Board rules (meta/instruction) — v0.11.4
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -24,11 +24,14 @@ Source of the rules every project reads from the board. To change them, edit thi
   transcript or coordinator), remove that id from it.
 - A THREAD (a session started for one task; it may run in the cloud
   or on my computer through Remote Control). It owns its own entry:
-  status, jobs, label and url. When I send /board-status in it, it
-  calls the project's thread-listing tool (list_thread_sessions or
-  list_threads) once, and its mod makes the card's thread list match
-  the project's open threads: it removes resolved and foreign entries
-  and adds missing ones. See the mod rules below.
+  status, jobs, label and url. I send /board-status at the start of
+  each fresh session; the thread then follows the plugin's
+  board-status skill: one check-in write (which, in auto mode, lets
+  the mod write for the rest of the session), one call of the
+  project's thread-listing tool, from which its mod places the thread
+  and makes the card's thread list match the project's open threads
+  (resolved and foreign entries go, missing ones are added), and a
+  line on what the card shows. See the mod rules below.
 - A REMOTE CONTROL helper session that works for a thread writes that
   thread's entry, never one of its own.
 

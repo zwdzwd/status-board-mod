@@ -14,6 +14,11 @@ Three parts, one version number (`VERSION`; the same string is in
   under `~/.claude/skills/`, synced ones included; the names `board` and `update-status-board` also work), so moving to a new board
   needs only the skill updated (the board's **Copy skill setup** button). Without the
   skill on disk it uses the address built into `hooks/register.ts`.
+- **The board-status skill** (`skills/board-status/`): `/board-status`, sent at the start of each
+  fresh session, makes the thread write once to the board (in auto mode that lets the plugin write
+  for the rest of the session), list the project's threads so the plugin can place the thread and
+  sync the card's thread list, and report what the card shows. `/board-info` shows what the
+  plugin itself sees.
 - **The messaging skill** (`skills/status-board-messaging/`): ships with the plugin, so every
   session that has the plugin can send a note to another project or check its own mail through
   the board's "messages" collection. The plugin's per-turn note shows a thread how many notes

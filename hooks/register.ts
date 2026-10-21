@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.11.3'
+const VERSION = '0.11.4'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -38,7 +38,7 @@ let sessionId = ''                       // $.session.id(): the transcript's id;
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
 let found: Found | null = null           // this chat's card and entry
 let removed = false                      // the entry was taken off the card (the thread was resolved)
-let lastWrite = ''                       // the last status written, for /board-status
+let lastWrite = ''                       // the last status written, for /board-info
 let registeredHere = false               // the entry still has the placeholder label
 let coordinator: { cardId: string; name: string } | null = null   // a project conversation, not a thread
 let initDone = false                     // the lookup at start has finished
@@ -713,7 +713,7 @@ function boardNote(count: boolean): string {
 // Where the mod cannot call the thread listing itself (Remote Control), the model's call feeds it.
 // The card's thread list is synced only when the user asks, with /board-status: the model's listing
 // call then feeds the mod, which places this chat if needed and makes the list match.
-const listAsk = () => ' When the user sends /board-status, call the project\'s thread-listing tool (list_thread_sessions or list_threads) once with no arguments; the mod uses its result to place this chat on its card and make the card\'s thread list match the project\'s open threads. Then tell the user, in a line, what the card shows. Do not edit the thread list yourself, and do not start a thread for it.'
+const listAsk = () => ' When the user sends /board-status, load the board-status skill and follow it here; never start a thread for it.'
 function noteBody(count: boolean, v: string): string {
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. The project's threads keep the card's thread list in step with the open threads; leave it to them unless the user asks.${IN_PLACE}`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
@@ -805,7 +805,8 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
-    try { await $.command.register({ name: 'board-status', description: 'Sync this project\'s Status Board card (thread list included), here in this chat (never start a thread for it)' }) } catch {}
+    // /board-status is the plugin's skill (skills/board-status); this command only shows what the mod sees.
+    try { await $.command.register({ name: 'board-info', description: 'Show which Status Board card and thread this chat updates' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
     remoteId = await findRemoteId($)
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
@@ -840,7 +841,7 @@ export const register: Register = on => {
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })
 
-  on('command.run', { command: 'board-status' }, async () => ({ text: describe() }))
+  on('command.run', { command: 'board-info' }, async () => ({ text: describe() }))
 
   // While a command runs on a machine for more than a few seconds (a shell, a remote computer, a
   // browser), the chat is waiting on that machine, not thinking: show it as working.

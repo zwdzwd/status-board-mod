@@ -155,7 +155,7 @@ console.log('M5. an ordinary turn leaves the card\'s thread list alone; the list
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
   ok(E.db.projects.methscope.threads.length === 3, 'plain turn: list untouched')
-  ok(/When the user sends \/board-status, call the project's thread-listing tool/.test(await E.note()), 'note says what /board-status does')
+  ok(/When the user sends \/board-status, load the board-status skill/.test(await E.note()), 'note points /board-status to its skill')
   await E.fire('turn.start', {}); await settle()
   await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify(listing) })
   await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
@@ -166,7 +166,7 @@ console.log('M5. an ordinary turn leaves the card\'s thread list alone; the list
   console.log('M5c. without its own listing tool, the mod syncs from the model\'s listing call in the status write; the note asks for that call')
   E = await env({ db: card([{ ...threads[0], label: 'Mac' }, ...threads.slice(1)]), tools: ['ArtifactData'] })
   await E.fire('session.start', {}); await settle()
-  ok(/call the project's thread-listing tool/.test(await E.note(['print'])), 'note shown to a print session on a card, asking for the listing')
+  ok(/board-status skill/.test(await E.note(['print'])), 'note shown to a print session on a card')
   await E.fire('turn.start', {}); await settle()
   const before = E.writes.length
   await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: 'Untrusted content follows.\n    ' + JSON.stringify(listing) })
@@ -291,7 +291,7 @@ console.log('N17. without its own listing tool, a remote thread is asked for the
 { const E = await env({ db: card([]), tools: ['ArtifactData'], latency: 200 })
   await E.fire('session.start', {})
   const n = await E.note()
-  ok(/looking up this chat/.test(n) && /call the project's thread-listing tool/.test(n), 'first-turn note asks for the listing: ' + n.slice(0, 120))
+  ok(/looking up this chat/.test(n) && /board-status skill/.test(n), 'first-turn note points to /board-status: ' + n.slice(0, 120))
   await settle(); await new Promise(r => setTimeout(r, 300)) }
 
 console.log('N18. the note shows the unread notes for the thread\'s card, and drops them once read')
