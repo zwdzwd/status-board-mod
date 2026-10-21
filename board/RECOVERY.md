@@ -1,7 +1,7 @@
 # Rebuilding the Status Board
 
 Use this if the board artifact is ever lost. The board's link lives in three places: the board's
-own data (`meta/instruction.board`), your `update-status-board` skill, and the plugin (`BOARD` in
+own data (`meta/instruction.board`), your `board-skill` skill, and the plugin (`BOARD` in
 `hooks/register.ts`). The cards and threads live only on the board; there is no backup, so the
 projects recreate them.
 
@@ -19,7 +19,7 @@ projects recreate them.
    `claude rc`. Until then, threads keep writing their status to the old link.
 5. **Recreate the cards.** Paste this into each project's own conversation (the coordinator):
 
-   > The Status Board was rebuilt. Read your update-status-board skill for its address and the
+   > The Status Board was rebuilt. Read your board-skill skill for its address and the
    > board's rules, then create this project's card on it from what you know of the project, with
    > its open threads from your thread list. If you cannot write to the board yourself, start a
    > thread to do it. Add no thread entry for yourself.

@@ -15,7 +15,7 @@ export function makeEnv(opts) {
   const doc = (c, id) => db[c]?.[id]
   const fmt = (c, id) => JSON.stringify({ id, data: db[c][id], version: ver[c + '/' + id] || 1 })
   function artifact(a) {
-    if (a.url !== BOARD) return { isError: true, text: 'wrong board' }
+    if (a.url !== (opts.board || BOARD)) return { isError: true, text: 'wrong board' }
     const c = a.collection, id = a.doc_id, key = c + '/' + id
     if (a.action === 'get') { if (!doc(c, id)) return { isError: true, text: `No document "${id}" in collection "${c}".` }; return { text: '=== BEGIN ===\n' + fmt(c, id) + '\n=== END ===' } }
     if (a.action === 'list') return { text: '=== BEGIN ===\n' + Object.keys(db[c] || {}).map(i => fmt(c, i)).join('\n') + '\n=== END ===' }
@@ -47,13 +47,17 @@ export function makeEnv(opts) {
       sleep: (ms, o) => new Promise((res, rej) => { const t = setTimeout(res, ms / 100); o?.signal?.addEventListener('abort', () => { clearTimeout(t); rej(new Error('aborted')) }) }),
       after: (ms, fn) => { const t = setTimeout(fn, ms / 100); return { cancel: () => clearTimeout(t) } },
     },
-    env: { get: async (n) => n === 'CLAUDE_CODE_REMOTE_SESSION_ID' ? (state.remote || undefined) : undefined },
+    env: { get: async (n) => n === 'CLAUDE_CODE_REMOTE_SESSION_ID' ? (state.remote || undefined) : n === 'HOME' ? opts.home : undefined },
     session: { id: async () => state.id, repo: async () => opts.repo || null, root: async () => opts.cwd || '/home/x', cwd: async () => opts.cwd || '/home/x' },
     ui: { status: (s) => statuses.push(s), invalidate: () => {} },
     model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] },
       complete: async (req) => { state.lastPrompt = req.prompt; return state.summary ? { isAnswered: true, text: state.summary } : { isAnswered: false, reason: 'api-error' } } },
     command: { register: async () => {} },
-    fs: { read: async () => '' },
+    // opts.files: path -> { text, at } for the skill files the mod looks up.
+    fs: { read: async (f) => (opts.files || {})[f]?.text ?? '',
+      stat: async (f) => { const x = (opts.files || {})[f]; if (!x) throw new Error('missing'); return { kind: 'file', size: x.text.length, mtimeMs: x.at || 0, isLink: false } },
+      list: async (d) => { const pre = d + '/', names = new Set(Object.keys(opts.files || {}).filter(f => f.startsWith(pre)).map(f => f.slice(pre.length).split('/')[0]))
+        if (!names.size) throw new Error('missing'); return [...names].map(name => ({ name, kind: 'directory', size: 0, mtimeMs: 0, isLink: false })) } },
   }
   const next = (r) => { const f = async (e) => r ?? e; f.budget = { remainingMs: 5000 }; f.origin = { plugin: 'engine' }; return f }
   async function fire(ev, e = {}, nextResult) { let out = nextResult; for (const h of handlers[ev] || []) out = await h($, e, next(nextResult)); return out }

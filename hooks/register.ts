@@ -6,9 +6,13 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.5'
+const VERSION = '0.9.6'
 const PLUGIN = 'status-board'
-const BOARD = 'https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T'
+// The board's address comes from the user's board-skill skill (see findBoard), so a new
+// board needs only the skill changed. This one is used where no such skill is on disk.
+const FALLBACK = 'https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T'
+let BOARD = FALLBACK
+let boardFrom = 'built in'
 const NOTE_ID = 'status-board:note'
 const PLACEHOLDER = 'New thread'
 
@@ -28,7 +32,7 @@ let sessionId = ''                       // $.session.id(): the transcript's id;
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
 let found: Found | null = null           // this chat's card and entry
 let removed = false                      // the entry was taken off the card (the thread was resolved)
-let lastWrite = ''                       // the last status written, for /board
+let lastWrite = ''                       // the last status written, for /board-status
 let registeredHere = false               // the entry still has the placeholder label
 let coordinator: { cardId: string; name: string } | null = null   // a project conversation, not a thread
 let initDone = false                     // the lookup at start has finished
@@ -88,6 +92,32 @@ async function limit<T>($: Engine, p: Promise<T>, ms: number, what: string): Pro
   try {
     return await Promise.race([p, $.clock.sleep(ms, { signal: ac.signal }).then((): never => { throw new Timeout(`${what} timed out`) })])
   } finally { ac.abort() }
+}
+
+// ---- Where the board is ----
+// The user's "board-skill" skill names the board (the names board and update-status-board still count). It
+// sits in the config folder's skills/, or for a skill synced from claude.ai in skills/synced/<ids>/;
+// the newest copy wins. A board link has the
+// form https://claude.ai/artifact/<id> (or …/code/artifact/<id>).
+const SKILLS = ['board-skill', 'board', 'update-status-board']
+const LINK = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9-]+/
+async function findBoard($: Engine): Promise<void> {
+  let dir = ''
+  try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
+  if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
+  if (!dir) return
+  const dirs = [dir + '/skills']
+  try { for (const e of await $.fs.list(dir + '/skills/synced')) dirs.push(`${dir}/skills/synced/${e.name}`) } catch {}
+  const files = dirs.flatMap(d => SKILLS.map(n => `${d}/${n}/SKILL.md`))
+  let best: { link: string; at: number; file: string } | null = null
+  for (const file of files) {
+    try {
+      const at = (await $.fs.stat(file, { resolve: true })).mtimeMs
+      const link = LINK.exec(await $.fs.read(file))?.[0]
+      if (link && (!best || at > best.at)) best = { link, at, file }
+    } catch {}
+  }
+  if (best) { BOARD = best.link; boardFrom = 'from ' + best.file }
 }
 
 // ---- Board access ----
@@ -482,11 +512,11 @@ function tell(count: boolean): string {
   return ` Tell the user in one line of your reply: ${report}.`
 }
 // Where the board and its rules are, added to every note: nothing else tells a session the address.
-const WHERE = ` (The Status Board is the artifact ${BOARD}, read and written with the ArtifactData tool; its rules are the "rules" field of collection meta, doc_id instruction.)`
+const WHERE = () => ` (The Status Board is the artifact ${BOARD}, read and written with the ArtifactData tool; its rules are the "rules" field of collection meta, doc_id instruction.)`
 function boardNote(count: boolean): string {
   const v = `Status Board mod v${VERSION}`
   if (!initDone) return `${v}: looking up this chat on the Status Board. Nothing is needed from you for it.`
-  return noteBody(count, v) + WHERE
+  return noteBody(count, v) + WHERE()
 }
 function noteBody(count: boolean, v: string): string {
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. Keep the card's thread list in step with the project's threads as the board's rules say.`
@@ -501,6 +531,9 @@ function noteBody(count: boolean, v: string): string {
   return `${v}: this chat is not on the Status Board.${told} If this chat is work on one of the user's projects: read the board's rules (meta/instruction, field rules), find or create the project's card, add this thread's entry with transcript ${sessionId} and session ${remoteId} (plus label and url), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so later threads register by themselves; the mod then writes this chat's status. If it is not project work, leave the board alone.`
 }
 function describe(): string {
+  return describeChat() + ` Board: ${BOARD} (${boardFrom}).`
+}
+function describeChat(): string {
   if (!initDone) return 'Status Board: still looking up this chat.'
   if (noBoard) return 'Status Board: this session has no ArtifactData tool; the mod writes nothing from here.'
   if (coordinator) return coordinator.cardId ? `Status Board: project conversation for the ${coordinator.name} card.` : 'Status Board: project conversation; no card matched.'
@@ -575,9 +608,10 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
-    try { await $.command.register({ name: 'board', description: 'Show which Status Board card and thread this chat updates' }) } catch {}
+    try { await $.command.register({ name: 'board-status', description: 'Show which Status Board card and thread this chat updates' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
     try { remoteId = (await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID')) || '' } catch {}
+    try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
     if (sessionId) startInit($)
     else initDone = true
     return next(e)
@@ -604,7 +638,7 @@ export const register: Register = on => {
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })
 
-  on('command.run', { command: 'board' }, async () => ({ text: describe() }))
+  on('command.run', { command: 'board-status' }, async () => ({ text: describe() }))
 
   // While a command runs on a machine for more than a few seconds (a shell, a remote computer, a
   // browser), the chat is waiting on that machine, not thinking: show it as working.

@@ -10,6 +10,10 @@ Three parts, one version number (`VERSION`; the same string is in
   (thinking / working / waiting on you / idle, plus a job line) at the start and end of
   every turn. A project conversation has no ArtifactData tool, so the mod writes nothing
   there; the project's Claude keeps the card's thread list in sync by the rules instead.
+  The plugin takes the board's address from your `board-skill` skill (the newest copy
+  under `~/.claude/skills/`, synced ones included; the names `board` and `update-status-board` also work), so moving to a new board
+  needs only the skill updated (the board's **Copy skill setup** button). Without the
+  skill on disk it uses the address built into `hooks/register.ts`.
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
   `user`). After a change, publish it to that same URL.
@@ -60,7 +64,7 @@ Everything is a one-time step per place; nothing is done per session.
 ## If the board is lost
 
 Follow `board/RECOVERY.md`: rebuild the page from this repo, record the rules and the new link in
-it, refresh the `update-status-board` skill with the board's **Copy skill setup** button, release
+it, refresh the `board-skill` skill with the board's **Copy skill setup** button, release
 the plugin with the new link, and paste one prompt into each project's conversation so it
 recreates its card.
 

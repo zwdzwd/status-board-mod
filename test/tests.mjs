@@ -220,5 +220,19 @@ console.log('X. every note after the lookup gives the board address and where th
     const E = await env(opts); await E.fire('session.start', {}); await settle()
     const n = await E.note(); ok(n.includes(BOARD) && /collection meta, doc_id instruction/.test(n), 'address in: ' + n.slice(0, 60)) } }
 
+console.log('Y. the board address comes from the board skill (or its old name), newest copy first')
+{ const NEW = 'https://claude.ai/artifact/NEWBOARDaaaa', OLD = 'https://claude.ai/artifact/OLDBOARDbbbb', S = '/u/.claude/skills'
+  const skill = (link) => `---\nname: update-status-board\n---\nThe Status Board is the artifact ${link}. Read and write it with the ArtifactData tool.`
+  const files = { [S + '/synced/a_b/update-status-board/SKILL.md']: { text: skill(OLD), at: 1 }, [S + '/synced/c_d/board/SKILL.md']: { text: skill(NEW), at: 2 } }
+  let E = await env({ db: card([{ label: 'HPC', session: R }]), home: '/u', files, board: NEW })
+  await E.fire('session.start', {}); await settle()
+  ok(E.entry('methscope') && (await E.note()).includes(NEW), 'synced skill names the board')
+  const h = E.handlers['tool.check'][0], mk = (plugin) => Object.assign(async () => 'NEXT', { origin: { plugin } })
+  ok((await h(E.$, { tool: 'ArtifactData', input: { url: NEW } }, mk('status-board')))?.decision === 'allow', 'calls to the skill\'s board allowed')
+  ok((await h(E.$, { tool: 'ArtifactData', input: { url: BOARD } }, mk('status-board'))) === 'NEXT', 'calls to the built-in board not auto-allowed')
+  E = await env({ db: card([{ label: 'HPC', session: R }]), home: '/u' })
+  await E.fire('session.start', {}); await settle()
+  ok(E.entry('methscope') && (await E.note()).includes(BOARD), 'no skill on disk: the built-in board') }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
