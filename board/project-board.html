@@ -234,6 +234,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
     if (all.length){ const r = el("div",{class:"threads"}); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
+    // Every running background job, by thread.
+    const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
+    if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
   }
   function placeTip(card){
@@ -259,10 +262,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
   function threadButton(t){
     const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s), jobs = jobsOf(t);
-    const light = jobs.length ? el("span",{class:"jobs",title:"Running: " + jobs.join("; "),text:String(jobs.length)}) : null;
+    const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
-    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "") + (jobs.length ? "\nRunning: " + jobs.join("; ") : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
+    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
     return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (tk ? ", " + STATUS[tk].label : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), light);
   }
 
