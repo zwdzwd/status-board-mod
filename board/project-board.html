@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <style>
-/* Layout: foldable sections by kind of work (Papers, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come live from each thread's session when its id is on the card; the card's own status follows its threads. */
+/* Layout: foldable sections by kind of work (Papers, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come from the status each thread writes to the card; the card's own status follows its threads. */
 :root{
   --bg:#f3f5f6; --panel:#ffffff; --fg:#14202a; --muted:#5b6b78; --line:#d9e0e5; --accent:#0f6e7a; --accent-soft:#e1f0f1;
   --think:#2563a8; --think-soft:#e3ecf8; --ok:#2f8a4e; --ok-soft:#e3f3e8; --warn:#b7791f; --warn-soft:#fbf0dc; --bad:#c2410c; --bad-soft:#fde8dd; --idle:#7b8794; --idle-soft:#eceff2;
@@ -33,9 +33,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--bad)} .s-blocked .dot{background:var(--bad)}
 .legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
 .legend>span{display:inline-flex;align-items:center;gap:6px}
-.live{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
-.live .ldot{width:7px;height:7px;border-radius:50%;background:var(--idle)}
-.live.on .ldot{background:var(--ok)}
 .jump{display:flex;flex-wrap:wrap;gap:6px}
 .jump a{font-size:13px;color:var(--fg);text-decoration:none;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 10px}
 .jump a:hover{border-color:var(--accent);color:var(--accent)}
@@ -80,6 +77,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn .tdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px;box-sizing:border-box}
 .tbtn.stale{border:1px dashed currentColor;opacity:.75}
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
+.tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
+.tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 @keyframes pulse{50%{opacity:.25}}
 @media (prefers-reduced-motion: reduce){.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:none}}
 .meta{font-family:var(--f-mono);font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap}
@@ -106,8 +105,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">Copy skill setup</button></div>
   </header>
 
-  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (a job is running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
-  <div class="live" id="live" hidden><span class="ldot"></span><span id="liveText"></span></div>
+  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (background jobs running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
 
   <div id="board" aria-live="polite">
     <div class="empty">Loading projects…</div>
@@ -132,10 +130,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  // A thread session's live bucket, as Claude Code Remote reports it.
-  const BUCKET = {WORKING:"thinking", BLOCKED:"waiting", REVIEW_READY:"waiting", FAILED:"waiting", COMPLETED:"idle"};
-  const CCR = "Claude Code Remote";
-  const VERSION = "0.9.6";
+  const VERSION = "0.10.0";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -155,7 +150,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     ].join("\n");
   }   // one version for board, mod and rules; bump all three together
   let projects = [];
-  let mcp = null; const live = {}, watches = {};
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
     if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
@@ -163,9 +157,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   const arr = v => Array.isArray(v) ? v.filter(x => x != null && x !== "") : (v ? [v] : []);
   const safe = u => typeof u === "string" && /^https:\/\//.test(u);
   const first = v => Array.isArray(v) ? arr(v)[0] : (typeof v === "string" ? v : "");
-  // Thread entries may carry the session id as session_… or cse_…; get_session takes session_….
-  const sid = t => { const s = t && typeof t.session === "string" ? t.session.trim() : "";
-    return /^(session|cse)_[A-Za-z0-9]+$/.test(s) ? s.replace(/^cse_/, "session_") : ""; };
 
   function ago(iso){
     if (!iso) return "never";
@@ -177,20 +168,18 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     return new Date(t).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
   }
 
+  // A thread's background jobs: "jobs" (the mod lists what still runs at the end of each turn), or the
+  // older single "job" line.
+  const jobsOf = t => { const js = arr(t.jobs).map(j => typeof j === "string" ? j : (j && j.text) || "").map(x => String(x).trim()).filter(Boolean);
+    return js.length || Array.isArray(t.jobs) ? js : ((typeof t.job === "string" && t.job.trim()) ? [t.job.trim()] : []); };
   // A thread's state. "status" is the chat itself: thinking (Claude is on a turn), waiting on you, or idle.
-  // "job" is a machine job the thread started (SLURM, CI, a build): while one is set, an idle chat shows as working.
+  // Background jobs are a separate light on the thread's button; an idle chat with jobs counts as working.
   // Thinking beats working, since a thinking thread can take something else only once it is done.
   function threadState(t){
-    const L = live[sid(t)];
-    // "working" is written while a command runs on a machine (the mod) or a job is running (the rules).
     const raw = t.status ? stKey(t.status) : "";
-    const job = (typeof t.job === "string" && t.job.trim()) || "";
-    let S = raw ? {key:raw, live:false, note:""} : (job ? {key:"idle", live:false, note:""} : null);
-    const fresh = t.at && (Date.now() - Date.parse(t.at)) < 3*3600000;
-    if (L && L.key === "thinking") S = {key:"thinking", live:true, note:L.note};
-    else if (S && S.key === "thinking" && fresh) { /* keep the stored thinking */ }
-    else if (L && L.key) S = {key:L.key, live:true, note:L.note};
-    if (S && S.key === "idle" && job) S = {key:"working", live:S.live, note:job === "a job" ? "" : job};
+    const jobs = jobsOf(t);
+    let S = raw ? {key:raw, note:""} : (jobs.length ? {key:"idle", note:""} : null);
+    if (S && S.key === "idle" && jobs.length) S = {key:"working", note:""};
     return S;
   }
   const endedAfterAt = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
@@ -204,8 +193,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   let folded = new Set();
   try { folded = new Set(JSON.parse(localStorage.getItem("sb-folded") || "[]")); } catch(e){}
   function saveFolded(){ try { localStorage.setItem("sb-folded", JSON.stringify([...folded])); } catch(e){} }
-  // A stored "thinking" with no update for 3+ hours is probably stale (live statuses never are).
-  const staleWork = (t, s) => s && !s.live && s.key === "thinking" && t.at && (Date.now() - Date.parse(t.at)) > 3*3600000;
+  // A stored "thinking" with no update for 3+ hours is probably stale.
+  const staleWork = (t, s) => s && s.key === "thinking" && t.at && (Date.now() - Date.parse(t.at)) > 3*3600000;
 
   function card(p){
     const c = el("article",{class:"card","data-id":p.id});
@@ -257,7 +246,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     y = Math.min(Math.max(g, y), Math.max(g, H - th - g));
     t.style.left = x + "px"; t.style.top = y + "px";
   }
-  let openId = null;   // which project's panel is open; survives re-renders from live updates
+  let openId = null;   // which project's panel is open; survives re-renders from card updates
   function showTip(card, p){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = card; openId = p.id; card.classList.add("open"); fillTip(p); placeTip(card); }
   function hideTip(){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = null; openId = null; $("tip").hidden = true; }
   // Click a card (not a button) to open its full text; click it again, click elsewhere, or press Esc to close.
@@ -269,11 +258,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   addEventListener("resize", hideTip);
 
   function threadButton(t){
-    const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s);
+    const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s), jobs = jobsOf(t);
+    const light = jobs.length ? el("span",{class:"jobs",title:"Running: " + jobs.join("; "),text:String(jobs.length)}) : null;
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
-    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (s.live ? ", live" : (t.at ? ", reported " + ago(t.at) : ", as of the last card update")) + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
-    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (tk ? ", " + STATUS[tk].label : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"));
+    const tip = "Open this thread in Claude" + (tk ? " (" + STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") + ")" : "") + (s && s.note ? "\n" + s.note : "") + (jobs.length ? "\nRunning: " + jobs.join("; ") : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
+    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (tk ? ", " + STATUS[tk].label : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), light);
   }
 
   function render(){
@@ -302,71 +292,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     $("sub").textContent = projects.length ? projects.length + " project" + (projects.length===1?"":"s") + (stale ? " · " + stale + " not updated in 2+ weeks" : "") + " · v" + VERSION : "Every project at a glance. v" + VERSION;
   }
 
-  // ---- Live thread status ----
-  let liveIssue = "", approvalBtn = null;
-  function setLive(text, on){
-    const box = $("live"); box.classList.toggle("on", !!on); $("liveText").textContent = text;
-    if (approvalBtn && liveIssue !== "approval_required"){ approvalBtn.remove(); approvalBtn = null; }
-  }
-  function liveSummary(){
-    const ids = Object.keys(watches), got = ids.filter(i => live[i] && live[i].key).length;
-    if (!mcp) return;
-    if (liveIssue === "needs_reauth") return setLive("Live thread status is off: reconnect Claude Code Remote in claude.ai Settings → Connectors.", false);
-    if (liveIssue === "server_not_connected") return setLive("Live thread status is off: add the Claude Code Remote connector in claude.ai Settings → Connectors.", false);
-    if (liveIssue === "not_allowed") return setLive("Live thread status is off for this page (Claude Code Remote was not allowed; " + (lastNote || "no code") + ").", false);
-    if (liveIssue === "approval_required"){
-      setLive("Live thread status needs your approval.", false);
-      if (!approvalBtn){ approvalBtn = el("button",{class:"btn",type:"button",text:"Allow live status"});
-        approvalBtn.onclick = async () => { const first = ids[0]; if (!first) return;
-          try { const r = await mcp.callTool(CCR, "get_session", {session_id:first}); apply(first, r); liveIssue = ""; liveSummary(); render(); }
-          catch(e){ liveIssue = e && e.code === "approval_required" ? "approval_required" : "not_allowed"; liveSummary(); } };
-        $("live").append(approvalBtn); }
-      return;
-    }
-    if (!ids.length) return setLive("Live thread status: no thread on the board has a session id yet; colors come from the last card update.", false);
-    setLive("Live thread status on for " + got + " of " + ids.length + " threads. Others show the last card update." + (got < ids.length && lastNote ? " Last problem: " + lastNote + "." : ""), got > 0);
-  }
-  function record(result){
-    const tryParse = x => { if (typeof x !== "string") return x; try { return JSON.parse(x); } catch(e){ const m = x.match(/\{[\s\S]*\}/); if (m) try { return JSON.parse(m[0]); } catch(e2){} } return null; };
-    const cands = [result && result.payload, result && result.structuredContent];
-    (result && result.content || []).forEach(c => { if (c && c.type === "text") cands.push(c.text); });
-    for (let c of cands){ c = tryParse(c); if (!c || typeof c !== "object") continue;
-      for (const r of [c, c.ccr, c.session, c.data]) if (r && typeof r === "object" && (r.status_bucket || r.session_status)) return r; }
-    return null;
-  }
-  let lastNote = "";
-  function apply(id, result){
-    const s = record(result);
-    if (!s){ lastNote = "unexpected reply shape"; return; }
-    const b = String(s.status_bucket || "").replace(/^SESSION_STATUS_BUCKET_/i, "").toUpperCase();
-    let key = BUCKET[b] || "";
-    if (/ARCHIVED/i.test(String(s.session_status || ""))) key = "idle";
-    if (!key){ lastNote = "unknown status " + (s.status_bucket || s.session_status || "none"); return; }
-    const pts = s.post_turn_summary || (s.external_metadata && s.external_metadata.post_turn_summary) || {};
-    const note = key === "waiting" ? (pts.needs_action || pts.status_detail || "") : (pts.status_detail || "");
-    live[id] = {key, note: typeof note === "string" ? note : ""};
-  }
-  function watch(id){
-    if (watches[id] || !mcp) return;
-    watches[id] = mcp.watchTool(CCR, "get_session", {session_id:id}, ev => {
-      if (ev.type === "data"){ apply(id, ev.result); if (liveIssue === "approval_required") liveIssue = ""; }
-      else { const code = ev.error && ev.error.code; lastNote = "error " + (code || "unknown");
-        if (["needs_reauth","server_not_connected","selection_required","blocked_by_policy","not_in_manifest","approval_required","not_granted","capability_disabled","capability_removed"].includes(code)){
-          delete live[id];
-          liveIssue = code === "approval_required" ? "approval_required" : code === "needs_reauth" ? "needs_reauth" : code === "server_not_connected" || code === "selection_required" ? "server_not_connected" : "not_allowed";
-        }
-      }
-      liveSummary(); render();
-    }, {refetchInterval: 30000});
-  }
-  function syncWatches(){
-    if (!mcp) return;
-    const want = new Set(); projects.forEach(p => arr(p.threads).forEach(t => { const i = sid(t); if (i) want.add(i); }));
-    want.forEach(watch);
-    Object.keys(watches).forEach(i => { if (!want.has(i)){ watches[i](); delete watches[i]; delete live[i]; } });
-    liveSummary();
-  }
-
   $("skillBtn").onclick = async () => {
     if (!boardLink) return;
     const text = skillPrompt(boardLink), btn = $("skillBtn");
@@ -375,16 +300,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   };
 
   (async function start(){
-    claude.use("mcp").then(m => { mcp = m;
-      if (!mcp) $("live").hidden = true;
-      else syncWatches(); });
     const db = await claude.use("db");
     if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
     db.collection("projects").onSnapshot(snap => {
       projects = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()));
       // Threads still on the old rule write only the card's status; color those threads from it.
       projects.forEach(p => { if (p.status) p.threads = arr(p.threads).map(t => t && !t.status ? Object.assign({}, t, {status:p.status, at:t.at || p.updated}) : t); });
-      syncWatches(); render();
+      render();
     }, err => { $("board").replaceChildren(el("div",{class:"empty",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload the page to try again."})); });
     // The board's own link is kept in its data (meta/instruction.board): a page cannot read its own
     // address. "Copy skill setup" builds the prompt from it, so a rebuilt board hands out its new link.

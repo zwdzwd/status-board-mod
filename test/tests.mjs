@@ -30,20 +30,17 @@ console.log('B. a folder named like a generic word does not match a card')
   await E.fire('turn.start', {}); await E.note(); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
   ok(!/Tell the user/.test(await E.note()), 'and not again after that turn') }
 
-console.log('C. a long command shows working + job, then the old job comes back')
+console.log('C. background jobs reported at stop become the entry\'s jobs list; none clears it')
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', job: 'SLURM 123 running', status: 'idle' }]) })
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await settle()
-  let release; const slow = new Promise(r => release = r)
-  const call = E.handlers['tool.call'][0](E.$, { tool: 'Bash', command: 'curl -H Authorization:Bearer abcdefghijklmnopqrstuvwxyz0123 https://x' }, async () => { await slow; return {} })
-  await new Promise(r => setTimeout(r, 120)); await settle()
-  const t = E.entry('methscope'); ok(t.status === 'working', 'working while the command runs')
-  ok(t.job === 'Bash: curl' && !/abcdef/.test(t.job), 'job shows the command with the secret hidden: ' + t.job)
-  release(); await call; await settle()
-  ok(E.entry('methscope').job === 'SLURM 123 running', 'old job restored')
-  E.state.classify = undefined
-  await E.fire('turn.complete', { answer: 'Here it is.', reason: 'answer' }); await settle()
-  ok(E.entry('methscope').job === 'SLURM 123 running', 'classifier naming no label leaves the job alone') }
+  await E.fire('classic.Stop', { background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite' }, { id: 'b2', type: 'subagent', status: 'completed', description: 'old' }] }); await settle()
+  let t = E.entry('methscope')
+  ok(JSON.stringify(t.jobs) === JSON.stringify([{ text: 'Run the test suite', type: 'shell', id: 'b1' }]) && t.job === '', 'running jobs listed, legacy job cleared: ' + JSON.stringify(t.jobs))
+  ok(t.status === 'thinking', 'status untouched by the jobs write: ' + t.status)
+  await E.fire('turn.complete', { answer: 'Started the tests.', reason: 'answer' }); await settle()
+  await E.fire('classic.Stop', { background_tasks: [] }); await settle()
+  ok(Array.isArray(E.entry('methscope').jobs) && !E.entry('methscope').jobs.length, 'empty list once the job is done') }
 
 console.log('D. /clear moves the entry to the new session id instead of ending it')
 { const E = await env({ db: card([{ label: 'HPC', transcript: 'aaaaaaaa-1111-2222-3333-444444444444' }]) })
@@ -247,15 +244,13 @@ console.log('N9. the end stamp keeps "waiting on you"')
   await E.fire('session.end', { reason: 'other' }); await settle()
   const t = E.entry('methscope'); ok(t.status === 'waiting_on_you' && !!t.ended, 'status kept, ended stamped') }
 
-console.log('N13. short secrets after an option never reach the board')
+console.log('N13. a job without a description shows its command, short secrets never reach the board')
 { const E = await env({ db: card([{ label: 'HPC', session: R }]) })
   await E.fire('session.start', {}); await settle(); await E.fire('turn.start', {}); await settle()
-  for (const [cmd, want] of [['sshpass -p hunter2 ssh hpc', 'Bash: sshpass'], ['mysql -pS3cret db', 'Bash: mysql'], ['sbatch run.sh', 'Bash: sbatch run.sh'], ['ssh user@host', 'Bash: ssh']]) {
-    let release; const slow = new Promise(r => release = r)
-    const c = E.handlers['tool.call'][0](E.$, { tool: 'Bash', command: cmd }, async () => { await slow; return {} })
-    await new Promise(r => setTimeout(r, 120)); await settle()
-    ok(E.entry('methscope').job === want, `${cmd} -> ${E.entry('methscope').job}`)
-    release(); await c; await settle() } }
+  for (const [cmd, want] of [['sshpass -p hunter2 ssh hpc', 'shell: sshpass'], ['mysql -pS3cret db', 'shell: mysql'], ['sbatch run.sh', 'shell: sbatch run.sh'], ['ssh user@host', 'shell: ssh']]) {
+    await E.fire('classic.Stop', { background_tasks: [{ id: 'x', type: 'shell', status: 'running', command: cmd }] }); await settle()
+    const got = (E.entry('methscope').jobs || [])[0]?.text
+    ok(got === want, `${cmd} -> ${got}`) } }
 
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })

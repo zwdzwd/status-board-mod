@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.9.10
+# Status Board rules (meta/instruction) — v0.10.0
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -23,7 +23,7 @@ Source of the rules every project reads from the board. To change them, edit thi
   transcript or coordinator), remove that id from it.
 - A THREAD (a session started for one task; it may run in the cloud
   or on my computer through Remote Control). It owns its own entry:
-  status, job, label and url. Its mod also keeps the card's thread
+  status, jobs, label and url. Its mod also keeps the card's thread
   list in step with the project's open threads: it removes resolved
   and foreign entries and adds missing ones. See the mod rules below.
 - A REMOTE CONTROL helper session that works for a thread writes that
@@ -49,19 +49,25 @@ does the per-turn bookkeeping by itself:
     change this thread's entry, also write sessions/<your UUID> =
     {card: <card id>, label};
   - it writes the thread's status: "thinking" while Claude is on a
-    turn, "working" while a command runs on a machine for more than a
-    few seconds, "waiting_on_you" when the reply asks me something,
-    "idle" otherwise; and a job line when the reply says work is still
-    running elsewhere;
+    turn, "waiting_on_you" when the reply asks me something, "idle"
+    otherwise; and, at the end of every turn, the thread's jobs: the
+    background work still running (commands, subagents, monitors,
+    workflows) as Claude Code reports it, [{text, type, id}], empty
+    when nothing runs. The board lights "working" on a thread with
+    jobs;
+  - in auto mode the mod's board writes need one approval that only
+    the thread's own write earns; until then its note asks for one
+    small write (the thread's sessions/<UUID> record) on the first
+    turn;
   - it stamps the entry ended when the session ends. The board shows a
     thread while it has been active in the last 8 hours and its session
     has not ended since; otherwise the thread is quiet (one click away
     on the card) and comes back when used again.
 Without the mod's note, do that bookkeeping yourself: write status
 "thinking" before other work and the end state after the reply is
-settled, each with at = ISO now; set job (one short line) when you
-start a machine job that outlives the turn and clear it to "" when it
-finishes.
+settled, each with at = ISO now; set jobs to the background work
+that outlives the turn ([{text}], one short line each) and to [] when
+it finishes.
 
 ## The card
 - Set the card's repo field once to this repository's owner/name (from
@@ -79,7 +85,7 @@ finishes.
     card shows two short lines; longer text is cut off)
   - next: the single next step, at most 12 words
   - blocker: what it is waiting on, at most 12 words, or "" if none
-  - threads: [{label, url, session, transcript, status, at, job}], one
+  - threads: [{label, url, session, transcript, status, at, jobs}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or

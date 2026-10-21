@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.20'
+const VERSION = '0.10.0'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -22,7 +22,7 @@ const LIST = /(^|__)(list_threads|list_thread_sessions)$/
 // Tools only a project conversation has: those that start threads.
 const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
-type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
+type Thread = { jobs?: { text: string; type: string; id: string }[]; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
@@ -64,6 +64,11 @@ let seenList: { list: ProjThread[]; paged: boolean } | null = null
 // can earn; it then covers the mod's writes for the rest of the session. Until a write has gone
 // through, the note asks the model for one small write: this chat's index record.
 let granted = false
+// The background work still running at the end of the last turn, as Claude Code reports it to Stop
+// hooks: the thread's "jobs" on the card. null until a report has come.
+type Job = { text: string; type: string; id: string }
+let jobsNow: Job[] | null = null
+let jobsWritten = ''
 let indexVersion: number | null = null   // sessions/<id>'s version, for the write the note asks for
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
@@ -342,6 +347,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         else if (job !== undefined && job.startsWith(TOOL)) { if (prevJob === undefined) prevJob = typeof t.job === 'string' ? t.job : ''; toolJob = job.slice(TOOL.length); n.job = toolJob }
         else if (job === RESTORE) { n.job = prevJob !== undefined ? prevJob : (t.job === toolJob ? '' : (t.job ?? '')) }
         else if (job !== undefined) n.job = job
+        if (jobsNow) { n.jobs = jobsNow; n.job = '' }
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
         return n
@@ -352,6 +358,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         if (seen && seenList === seen) { seenList = null; lastSync = `synced from the model's listing: ${th.length} thread${th.length === 1 ? '' : 's'}` }
         if (job !== undefined && !job.startsWith(TOOL)) { prevJob = undefined; toolJob = '' }
         if (status) lastWrite = status
+        if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
         say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}`)
         return
       } catch (err) { if (!isConflict(err)) throw err }   // someone else wrote the card: read again, once
@@ -670,7 +677,7 @@ async function decide($: Engine, answer: string): Promise<{ status: string; job?
   let k: string | undefined
   try { k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, RUN, DONE]) } catch {}
   if (k === ASK) return { status: 'waiting_on_you', waiting: await askedFor($, answer) }
-  if (k === RUN) return { status: 'idle', job: KEEP }
+  if (k === RUN) return { status: 'idle' }   // the jobs list shows what still runs
   if (k === DONE) return { status: 'idle', job: '' }
   const last = answer.trim().split('\n').pop() || ''
   if (/\?\s*$/.test(last)) return { status: 'waiting_on_you', waiting: lastQuestion(answer) }
@@ -783,13 +790,8 @@ export const register: Register = on => {
       return r
     }
     if (e.agentId !== undefined || !found || !/bash|shell|device|computer|remote|browser|ssh|slurm/i.test(name)) return next(e)
+    // No status write while a command runs: the board refuses the mod's writes until it returns.
     toolDepth++
-    if (toolDepth === 1) {
-      toolShown = false
-      const text = jobText(name, (e as any).command)
-      const seq = turnSeq
-      toolTimer = $.clock.after(5000, () => { if (seq === turnSeq && turnActive) { toolShown = true; void setStatus($, 'working', TOOL + text) } })
-    }
     try { return await next(e) }
     finally {
       toolDepth = Math.max(0, toolDepth - 1)
@@ -798,6 +800,18 @@ export const register: Register = on => {
         if (toolShown && turnActive) { toolShown = false; void setStatus($, 'thinking', RESTORE) }
       }
     }
+  })
+
+  // What still runs when the main loop stops: the thread's jobs list, written when it changes.
+  on('classic.Stop', async ($, e, next) => {
+    const tasks = Array.isArray((e as any).background_tasks) ? (e as any).background_tasks as Record<string, unknown>[] : []
+    jobsNow = tasks.filter(t => t && !/^(completed|failed|killed|stopped|done)$/i.test(String(t.status || ''))).map(t => ({
+      text: oneLine(String(t.description || '') || jobText(String(t.type || 'job'), t.command)).slice(0, 80),
+      type: String(t.type || ''), id: String(t.id || ''),
+    }))
+    trace($, `jobs at stop: ${jobsNow.length ? jobsNow.map(j => j.type + ': ' + j.text).join('; ') : 'none'}`)
+    if (found && initDone && JSON.stringify(jobsNow) !== jobsWritten) void setStatus($, '')
+    return next(e)
   })
 
   // Main-loop turns only.
