@@ -14,6 +14,10 @@ Three parts, one version number (`VERSION`; the same string is in
   under `~/.claude/skills/`, synced ones included; the names `board` and `update-status-board` also work), so moving to a new board
   needs only the skill updated (the board's **Copy skill setup** button). Without the
   skill on disk it uses the address built into `hooks/register.ts`.
+- **The messaging skill** (`skills/status-board-messaging/`): ships with the plugin, so every
+  session that has the plugin can send a note to another project or check its own mail through
+  the board's "messages" collection. The plugin's per-turn note shows a thread how many notes
+  wait for its project.
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
   `user`). After a change, publish it to that same URL.
