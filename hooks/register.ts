@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.7'
+const VERSION = '0.9.8'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -15,10 +15,10 @@ let BOARD = FALLBACK
 let boardFrom = 'built in'
 const NOTE_ID = 'status-board:note'
 const PLACEHOLDER = 'New thread'
-// The project's thread listing: list_threads in a project conversation, list_thread_sessions in a thread.
+// The project's thread listing, under either name; threads have one too.
 const LIST = /(^|__)(list_threads|list_thread_sessions)$/
-// Tools only a project conversation has.
-const PROJECT = /(^|__)(list_threads|start_thread_session|start_rc_session|list_thread_connectors)$/
+// Tools only a project conversation has: those that start threads.
+const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
 type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
@@ -337,7 +337,7 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
 // ---- Project conversations (coordinators) ----
 // The project conversation is the session that can start the project's threads. Its thread-listing
 // tool is found by name, or by trying the names under the project tools' prefix. A thread has a
-// listing too (list_thread_sessions), which only helps it find its card. In practice project
+// listing too, which only helps it find its card. In practice project
 // conversations have no ArtifactData, so the sync below only runs where both tools exist.
 async function listToolName($: Engine): Promise<string> {
   if (listTool !== null) return listTool
