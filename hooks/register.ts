@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.10.3'
+const VERSION = '0.10.4'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -55,8 +55,6 @@ let loadedTool = false                   // ToolSearch was tried for ArtifactDat
 let listTool: string | null = null       // the thread-listing tool, '' once probed and absent
 let probed: ToolResult | null = null     // the probe's listing, reused by the first sync
 let partial = false                      // the last listing had more pages: remove nothing on it
-let toolsSeen: string[] = []             // the tool names that matter here, for the diagnostic record
-let lastSync = ''                        // the last thread-list sync's outcome
 // Where the mod cannot call the listing itself, the model calls it once a turn; its result waits here
 // and is applied with the next status write.
 let seenList: { list: ProjThread[]; paged: boolean } | null = null
@@ -144,29 +142,9 @@ async function findBoard($: Engine): Promise<void> {
   if (best) { BOARD = best.link; boardFrom = 'from ' + best.file }
 }
 
-// ---- Trace ----
-// Everything the mod shows on its status line also goes to ~/.claude/status-board.log (the last
-// 20 kB), since a Remote Control or project session shows no status line to anyone.
-let logPath: string | null = null
-let logging: Promise<void> = Promise.resolve()
+// The mod's status line.
 function say($: Engine, text: string): void {
   try { $.ui.status(text) } catch {}
-  trace($, text)
-}
-function trace($: Engine, text: string): void {
-  const line = `${now()} ${sessionId.slice(0, 8) || '-'} v${VERSION} ${text}\n`
-  logging = logging.then(async () => {
-    if (logPath === null) {
-      let dir = ''
-      try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
-      if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
-      logPath = dir ? dir + '/status-board.log' : ''
-    }
-    if (!logPath) return
-    let old = ''
-    try { old = await $.fs.read(logPath) } catch {}
-    await $.fs.write(logPath, (old + line).slice(-20000))
-  }).catch(() => {})
 }
 
 // The remote session id (cse_…). Cloud sessions carry it in CLAUDE_CODE_REMOTE_SESSION_ID; a Remote
@@ -199,11 +177,11 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   // Auto mode may refuse a call no request asked for, asking for it to be issued once more: do that.
   const refusal = String(r.deny ?? (r.isError ? r.text : '') ?? '')
   if (/gave no verdict/i.test(refusal)) {
-    try { trace($, 'tool.check query: ' + JSON.stringify(await $.tool.check({ tool: 'ArtifactData', input: { url: BOARD, ...args } } as any))) } catch (err) { trace($, 'tool.check query failed: ' + msg(err)) } trace($, 'auto mode gave no verdict, retrying once: ' + refusal); r = await boardCall($, args, ms) }
-  if (r.missing) { noBoard = true; trace($, 'ArtifactData missing: ' + String(r.text ?? '').slice(0, 160)); throw new Error('no ArtifactData tool in this session') }
+    r = await boardCall($, args, ms) }
+  if (r.missing) { noBoard = true; throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
-    if (!/^No document /i.test(text)) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`; trace($, `board error (${turnActive ? 'in turn' : 'between turns'}, tool running ${toolDepth > 0}): ${String(args.action)} ${String(args.collection ?? '')}: ${text}`) }
+    if (!/^No document /i.test(text)) lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`
     throw new Error(text)
   }
   lastError = ''
@@ -365,7 +343,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
       if (seen && seen.list.some(p => p.open)) th = syncedThreads(th, seen.list, seen.paged)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
-        if (seen && seenList === seen) { seenList = null; lastSync = `synced from the model's listing: ${th.length} thread${th.length === 1 ? '' : 's'}` }
+        if (seen && seenList === seen) seenList = null
         if (job !== undefined && !job.startsWith(TOOL)) { prevJob = undefined; toolJob = '' }
         if (status) lastWrite = status
         if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
@@ -408,7 +386,6 @@ async function listToolName($: Engine): Promise<string> {
   let names: string[] = []
   try { names = (await $.tool.list()).map(t => t.name) } catch {}
   projectTools = names.some(x => PROJECT.test(x))
-  toolsSeen = names.filter(x => /thread|project|rc_|ArtifactData/i.test(x)).slice(0, 20)
   let n = names.find(x => /(^|__)list_threads$/.test(x)) || names.find(x => LIST.test(x)) || ''
   if (!n) {
     // The tool list a hook sees may leave out tools the session can still call: try the names.
@@ -421,7 +398,6 @@ async function listToolName($: Engine): Promise<string> {
     }
   }
   listTool = n
-  trace($, `tools: listing ${n || 'none'}, project conversation ${projectTools}, seen [${toolsSeen.join(' ')}] of ${names.length}`)
   return n
 }
 
@@ -552,22 +528,7 @@ function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Th
 function syncThreads($: Engine): Promise<void> {
   const f = found
   if (!f) return Promise.resolve()
-  return enqueue($, 'thread list sync', async () => { lastSync = await syncThreadList($, f.cardId); say($, `board: ${f.name} threads: ${lastSync}`) })
-}
-
-// What the mod decided and why, in diagnostics/<session id> on the board, since the user cannot see
-// the mod's status line from a project page.
-function diagnose($: Engine, when: string): Promise<void> {
-  if (noBoard || !sessionId) return Promise.resolve()
-  const data = { version: VERSION, at: now(), when, remote: remoteId, role: coordinator ? 'coordinator' : found ? 'thread' : removed ? 'removed' : 'none',
-    card: (coordinator && coordinator.cardId) || (found && found.cardId) || '', label: (found && found.label) || '', listTool: listTool || '',
-    toolsSeen, partial, lastSync, lastWrite, lastError, report, board: BOARD }
-  return enqueue($, 'diagnostic', async () => {
-    const d = await getDoc($, 'diagnostics', sessionId)
-    const args: Record<string, unknown> = { action: 'set', collection: 'diagnostics', doc_id: sessionId, data }
-    if (d) args.if_version = d.version
-    await call($, args)
-  })
+  return enqueue($, 'thread list sync', async () => { say($, `board: ${f.name} threads: ${await syncThreadList($, f.cardId)}`) })
 }
 
 // ---- Startup ----
@@ -610,7 +571,6 @@ async function init($: Engine): Promise<void> {
     say($, `board: could not read the board (${msg(err).slice(0, 60)})`)
   } finally {
     initDone = true
-    void diagnose($, 'start')
   }
 }
 function startInit($: Engine): void { initDone = false; initPromise = init($) }
@@ -618,7 +578,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  prevJob = undefined; toolJob = ''; lastSync = ''; granted = false; indexVersion = null
+  prevJob = undefined; toolJob = ''; granted = false; indexVersion = null
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -735,8 +695,6 @@ export const register: Register = on => {
   on('tool.check', ($, e, next) => {
     const base = (n: unknown) => String(n || '').split('@')[0]?.split('/').pop() ?? ''
     const o = base(next.origin && next.origin.plugin)
-    const input0 = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
-    if (/artifact/i.test(String(e.tool)) || o) trace($, `tool.check ${e.tool}: origin ${JSON.stringify(next.origin)}, plugin ${$.plugin.name}, url ${String(input0.url ?? '')}`)
     if (!o || (o !== base($.plugin.name) && o !== PLUGIN)) return next(e)
     const input = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
     // The board tool by any name the host gives it (ArtifactData, or a prefixed form of it).
@@ -751,7 +709,6 @@ export const register: Register = on => {
     try { sessionId = await $.session.id() } catch {}
     remoteId = await findRemoteId($)
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
-    trace($, `session.start: remote ${remoteId || 'none'}, board ${BOARD} (${boardFrom})`)
     if (sessionId) startInit($)
     else initDone = true
     return next(e)
@@ -790,7 +747,7 @@ export const register: Register = on => {
     if (e.agentId === undefined && name === 'ArtifactData') {
       const r = await next(e) as unknown as ToolResult
       const a = String(((e as any).input?.action ?? (e as any).action) || '')
-      if (r && !r.isError && r.deny === undefined && a && !['get', 'list', 'query', 'profiles'].includes(a)) { granted = true; trace($, `model's board write (${a}): mod writes approved for this session`) }
+      if (r && !r.isError && r.deny === undefined && a && !['get', 'list', 'query', 'profiles'].includes(a)) granted = true
       return r as any
     }
     // The model's own call of the thread listing: keep its result for the next status write.
@@ -799,15 +756,14 @@ export const register: Register = on => {
       const list = readListing(r as unknown as ToolResult)
       if (list) {
         seenList = { list, paged: partial }
-        trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`)
         // A new thread the mod could not place at start: the listing names its project's threads,
         // so the card holding one of them is its card.
         if (!found && !removed && remoteId && initDone && !noBoard) void enqueue($, 'registration', async () => {
           if (found) return
           const c = await threadCard($, await cards($), list)
-          if (!c) { trace($, 'no card holds this project\'s threads'); return }
+          if (!c) return
           found = await registerThread($, c)
-          if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the model's listing`) }
+          if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found) }
         })
       }
       return r
@@ -832,7 +788,6 @@ export const register: Register = on => {
       text: oneLine(String(t.description || '') || jobText(String(t.type || 'job'), t.command)).slice(0, 80),
       type: String(t.type || ''), id: String(t.id || ''),
     }))
-    trace($, `jobs at stop: ${jobsNow.length ? jobsNow.map(j => j.type + ': ' + j.text).join('; ') : 'none'}`)
     if (found && initDone && JSON.stringify(jobsNow) !== jobsWritten) void setStatus($, '')
     return next(e)
   })
@@ -844,7 +799,6 @@ export const register: Register = on => {
       turnActive = true
       toolDepth = 0
       await refreshSession($)
-      trace($, `turn.start: initDone ${initDone}, found ${found ? found.cardId + '/' + found.label : 'none'}, coordinator ${coordinator ? coordinator.cardId || '?' : 'no'}, noBoard ${noBoard}`)
       if (initDone && initFailed > 0 && initFailed < 3 && !found && !coordinator) startInit($)   // the board failed at start: try again
       if (found && initDone) void setStatus($, 'thinking')
     }
@@ -883,7 +837,6 @@ export const register: Register = on => {
         if (seq !== turnSeq) return
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
         if (listTool && found) await syncThreads($)
-        await diagnose($, 'turn')
       } catch (err) { say($, `board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out
