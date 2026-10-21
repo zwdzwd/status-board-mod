@@ -266,6 +266,13 @@ console.log('N16. a new Remote Control thread not matched at start registers fro
   const t = E.db.projects.mine.threads.find(t => t.session === RID)
   ok(t && t.label === 'HPC run' && t.url === U + 'cmsg_NEW' && t.status === 'idle', 'registered, named and linked: ' + JSON.stringify(t)) }
 
+console.log('N17. without its own listing tool, a remote thread is asked for the listing from the first turn, before the lookup ends')
+{ const E = await env({ db: card([]), tools: ['ArtifactData'], latency: 200 })
+  await E.fire('session.start', {})
+  const n = await E.note()
+  ok(/looking up this chat/.test(n) && /call the project's thread-listing tool/.test(n), 'first-turn note asks for the listing: ' + n.slice(0, 120))
+  await settle(); await new Promise(r => setTimeout(r, 300)) }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()
