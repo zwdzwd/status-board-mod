@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.6'
+const VERSION = '0.9.7'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -15,6 +15,10 @@ let BOARD = FALLBACK
 let boardFrom = 'built in'
 const NOTE_ID = 'status-board:note'
 const PLACEHOLDER = 'New thread'
+// The project's thread listing: list_threads in a project conversation, list_thread_sessions in a thread.
+const LIST = /(^|__)(list_threads|list_thread_sessions)$/
+// Tools only a project conversation has.
+const PROJECT = /(^|__)(list_threads|start_thread_session|start_rc_session|list_thread_connectors)$/
 
 type Thread = { label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
@@ -50,6 +54,7 @@ let probed: ToolResult | null = null     // the probe's listing, reused by the f
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
+let skipped = ''                         // a card matched by repository but held by another project
 let report = ''                          // what the user should hear about, if anything
 let reportedText = ''                    // what the model was already told to say
 let composedReport = ''                  // what the note asked for during this turn
@@ -225,6 +230,21 @@ async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
   return null
 }
 
+// The card a new thread registers on. Where the session can list its project's threads, the card
+// holding one of them is the project's. A card matched only by repository or name is then refused
+// when it lists threads the listing does not know: another project working in the same repository.
+async function threadCard($: Engine, docs: Card[]): Promise<Card | null> {
+  const list = listTool ? await projectThreads($) : null
+  if (list) {
+    const own = docs.find(c => threadsOf(c).some(t => t && list.some(p => matchesThread(p, t))))
+    if (own) return own
+  }
+  const c = await guessCard($, docs)
+  if (!c || !list || !threadsOf(c).some(t => t && (threadIdOf(t) || t.session))) return c
+  skipped = nameOf(c)
+  return null
+}
+
 // Add this session as a thread of a card. The label and url are unknown to the mod; the thread's
 // own Claude fills them in (the note asks for that until it is done).
 async function registerThread($: Engine, card: Card): Promise<Found | null> {
@@ -316,17 +336,18 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
 
 // ---- Project conversations (coordinators) ----
 // The project conversation is the session that can start the project's threads. Its thread-listing
-// tool is found by name, or by trying the name under the project tools' prefix. In practice project
+// tool is found by name, or by trying the names under the project tools' prefix. A thread has a
+// listing too (list_thread_sessions), which only helps it find its card. In practice project
 // conversations have no ArtifactData, so the sync below only runs where both tools exist.
 async function listToolName($: Engine): Promise<string> {
   if (listTool !== null) return listTool
   let names: string[] = []
   try { names = (await $.tool.list()).map(t => t.name) } catch {}
-  projectTools = names.some(x => /(^|__)(list_thread_sessions|start_thread_session|start_rc_session|list_thread_connectors)$/.test(x))
-  let n = names.find(x => /(^|__)list_thread_sessions$/.test(x)) || ''
+  projectTools = names.some(x => PROJECT.test(x))
+  let n = names.find(x => /(^|__)list_threads$/.test(x)) || names.find(x => LIST.test(x)) || ''
   if (!n && projectTools) {
     const prefixes = [...new Set(names.filter(x => /__(list|start)_(thread|rc)/.test(x)).map(x => x.slice(0, x.lastIndexOf('__') + 2)))]
-    for (const cand of prefixes.map(p => p + 'list_thread_sessions')) {
+    for (const cand of prefixes.flatMap(p => [p + 'list_threads', p + 'list_thread_sessions'])) {
       try {
         const r = await limit($, $.tool.call({ tool: cand } as any) as Promise<ToolResult>, 15000, 'thread listing')
         if (r && r.deny === undefined && !r.isError) { n = cand; probed = r; break }
@@ -352,7 +373,14 @@ function threadRecord(v: unknown): ProjThread | null {
 }
 function threadRecords(v: unknown, depth = 0): ProjThread[] | null {
   if (v == null || depth > 8) return null
-  if (typeof v === 'string') { const s = v.trim(); if (!/^[[{]/.test(s)) return null; try { return threadRecords(JSON.parse(s), depth + 1) } catch { return null } }
+  if (typeof v === 'string') {
+    // The listing may come wrapped in a notice, its JSON then on a line of its own.
+    const s = v.trim()
+    for (const part of /^[[{]/.test(s) ? [s] : s.split('\n').map(l => l.trim()).filter(l => /^[[{]/.test(l))) {
+      try { const r = threadRecords(JSON.parse(part), depth + 1); if (r) return r } catch {}
+    }
+    return null
+  }
   if (Array.isArray(v)) {
     const recs = v.map(threadRecord)
     if (v.length && recs.every(Boolean)) return recs as ProjThread[]
@@ -377,7 +405,7 @@ const matchesThread = (p: ProjThread, t: Thread) => p.ids.some(i => same(i, thre
 
 async function detectCoordinator($: Engine): Promise<void> {
   await listToolName($)
-  if (!listTool && !projectTools) return
+  if (!projectTools) return
   coordinator = { cardId: '', name: '' }
   const list = await projectThreads($)
   let all: Card[] = []
@@ -455,7 +483,7 @@ async function init($: Engine): Promise<void> {
       const docs = await cards($)
       found = findIn(docs)
       // Only a remote session (a project's thread) registers itself; a local or one-shot run does not.
-      if (!found && remoteId) { const c = await guessCard($, docs); if (c) found = await registerThread($, c) }
+      if (!found && remoteId) { const c = await threadCard($, docs); if (c) found = await registerThread($, c) }
     }
     if (found) {
       registeredHere = found.label === PLACEHOLDER
@@ -466,7 +494,7 @@ async function init($: Engine): Promise<void> {
       report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
       $.ui.status('board: no ArtifactData tool in this session')
     } else {
-      if (remoteId) report = `the Status Board mod could not match this chat to a project card (${lastError ? 'board call failed: ' + lastError : 'no card\'s repo or name matches this repository or folder'})`
+      if (remoteId) report = `the Status Board mod could not match this chat to a project card (${lastError ? 'board call failed: ' + lastError : skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card\'s repo or name matches this repository or folder'})`
       $.ui.status('board: no card matched this chat')
     }
   } catch (err) {
@@ -480,7 +508,7 @@ async function init($: Engine): Promise<void> {
 function startInit($: Engine): void { initDone = false; initPromise = init($) }
 
 function reset(): void {
-  found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null
+  found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
   prevJob = undefined; toolJob = ''
 }
@@ -602,7 +630,7 @@ export const register: Register = on => {
     if (!o || (o !== base($.plugin.name) && o !== PLUGIN)) return next(e)
     const input = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
     const ok = (e.tool === 'ArtifactData' && input.url === BOARD)
-      || /(^|__)list_thread_sessions$/.test(e.tool)
+      || LIST.test(e.tool)
       || (e.tool === 'ToolSearch' && input.query === 'select:ArtifactData')
     return ok ? { decision: 'allow' as const } : next(e)
   }).catch(($, e, next) => next(e))

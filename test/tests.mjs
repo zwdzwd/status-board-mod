@@ -112,15 +112,38 @@ console.log('L. teammates do not get the note')
 { const E = await env({ db: card([]) }); await E.fire('session.start', {}); await settle()
   const r = await E.fire('prompt.compose', { traits: ['teammate'] }, { sections: [] }); ok(!r.sections.length, 'no section for a teammate') }
 
-console.log('M. listing parser: open/closed words, wrapper objects')
+console.log('M. project conversation with list_threads; listing parser: open/closed words, wrapper objects and text')
 { const E = await env({ db: { projects: { methscope: { name: 'MethScope', threads: [{ label: 'Writing', session: 'cse_A', url: 'https://claude.ai/code/project/chan_1?thread=cmsg_A' }, { label: 'Old', session: 'cse_C' }] } } },
-    tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'],
+    tools: ['ArtifactData', 'mcp__hb__list_threads'], wrap: true,
     listing: { project: { id: 'cmsg_project', name: 'proj' }, sessions: [{ session_id: 'cse_A', thread_id: 'cmsg_A', title: 'Writing', status: 'unresolved' }, { session_id: 'cse_B', thread_id: 'cmsg_B', title: 'Analysis', status: 'active' }, { session_id: 'cse_C', thread_id: 'cmsg_C', title: 'Old', status: 'resolved' }] } })
   await E.fire('session.start', {}); await settle()
   const labels = E.db.projects.methscope.threads.map(t => t.label).join(',')
   ok(labels === 'Writing,Analysis', 'card synced to open threads: ' + labels)
   ok(E.db.projects.methscope.threads[1].url === 'https://claude.ai/code/project/chan_1?thread=cmsg_B', 'new entry gets its url') }
 
+
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa'
+  const repo = { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' }
+  const other = { label: 'BoardMac', session: 'cse_OTHER', url: 'https://claude.ai/code/project/chan_2?thread=cmsg_OTHER' }
+  const listing = { sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Mac', status: 'active' }, { session_id: 'cse_A', thread_id: 'cmsg_A', title: 'Writing', status: 'active' }] }
+
+  console.log('M2. a thread with list_thread_sessions is not taken for the project conversation')
+  let E = await env({ db: card([]), repo, tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing, wrap: true })
+  await E.fire('session.start', {}); await settle()
+  ok(!/project conversation/.test(await E.note()), 'not a coordinator')
+  ok(E.entry('methscope')?.session === RID, 'registered on the empty card matched by repo')
+
+  console.log('M3. a card matched by repo but listing another project\'s threads is refused')
+  E = await env({ db: card([other]), repo, tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing, wrap: true })
+  await E.fire('session.start', {}); await settle()
+  ok(E.db.projects.methscope.threads.length === 1, 'nothing added to the other project\'s card')
+  ok(/MethScope card shares this repository/.test(await E.note()), 'says why')
+
+  console.log('M4. a thread registers on the card holding its project\'s threads, whatever the repo')
+  E = await env({ db: { projects: { ...card([other]).projects, mine: { name: 'Mine', threads: [{ label: 'Writing', session: 'cse_A', url: 'https://claude.ai/code/project/chan_1?thread=cmsg_A' }] } } },
+    repo, tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing })
+  await E.fire('session.start', {}); await settle()
+  ok(E.entry('mine')?.session === RID && E.db.projects.methscope.threads.length === 1, 'registered on its project\'s card') }
 
 const R = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'aaaaaaaa-1111-2222-3333-444444444444'
 console.log('N1. an entry written by the coordinator (session id, no transcript) is found, not duplicated')

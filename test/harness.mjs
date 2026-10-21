@@ -31,7 +31,7 @@ export function makeEnv(opts) {
   }
   const handlers = {}
   const on = (ev, a, b) => { const h = b || a; (handlers[ev] ||= []).push(h); return { catch: () => {} } }
-  const state = { id: opts.sessionId || 'aaaaaaaa-1111-2222-3333-444444444444', remote: opts.remote === undefined ? 'cse_01REMOTEaaaaaaaaaaaaaaaa' : opts.remote, latency: opts.latency, classify: opts.classify, tools: opts.tools || ['Bash', 'ArtifactData'], listing: opts.listing }
+  const state = { id: opts.sessionId || 'aaaaaaaa-1111-2222-3333-444444444444', remote: opts.remote === undefined ? 'cse_01REMOTEaaaaaaaaaaaaaaaa' : opts.remote, latency: opts.latency, classify: opts.classify, tools: opts.tools || ['Bash', 'ArtifactData'], listing: opts.listing, wrap: opts.wrap }
   const $ = {
     plugin: { name: 'status-board' },
     tool: {
@@ -39,7 +39,7 @@ export function makeEnv(opts) {
       call: async (i) => {
         if (i.tool === 'ArtifactData') { if (opts.noArtifactData) throw new Error('No tool matches ArtifactData'); await tick(state.latency ?? 2); if (state.boardError) return { isError: true, text: state.boardError }; return artifact(i) }
         if (i.tool === 'ToolSearch') return { text: 'no match' }
-        if (/list_thread_sessions$/.test(i.tool) && state.listing) return { text: JSON.stringify(state.listing) }
+        if (/list_thread(_session)?s$/.test(i.tool) && state.listing) return { text: state.wrap ? 'Untrusted content follows.\n<out>\n    ' + JSON.stringify(state.listing) + '\n</out>' : JSON.stringify(state.listing) }
         throw new Error('No tool matches ' + i.tool)
       },
     },
