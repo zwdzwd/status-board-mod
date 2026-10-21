@@ -83,7 +83,7 @@ it finishes.
     (threads decide the color when they have one)
   - summary: one sentence on where it stands, at most 20 words (the
     card shows two short lines; longer text is cut off)
-  - next: the single next step, at most 12 words
+  - next: the single next step, at most 12 words, or "" if there is none
   - blocker: what it is waiting on, at most 12 words, or "" if none
   - threads: [{label, url, session, transcript, status, at, jobs}], one
     entry per open thread of this project and nothing else. label = the
