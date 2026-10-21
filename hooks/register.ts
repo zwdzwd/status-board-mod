@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.12'
+const VERSION = '0.9.13'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -56,6 +56,9 @@ let probed: ToolResult | null = null     // the probe's listing, reused by the f
 let partial = false                      // the last listing had more pages: remove nothing on it
 let toolsSeen: string[] = []             // the tool names that matter here, for the diagnostic record
 let lastSync = ''                        // the last thread-list sync's outcome
+// Where the mod cannot call the listing itself, the model calls it once a turn; its result waits here
+// and is applied with the next status write.
+let seenList: { list: ProjThread[]; paged: boolean } | null = null
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -316,7 +319,8 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         return
       }
       const at = now()
-      const th = threadsOf(card).map(t => {
+      const seen = seenList
+      let th = threadsOf(card).map(t => {
         if (!isMine(t, ids)) return t
         const n: Thread = { ...t }
         if (status) { n.status = status; n.at = at; if (status !== 'waiting_on_you') delete n.waiting }
@@ -331,8 +335,10 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         if (ended === false) delete n.ended
         return n
       })
+      if (seen && seen.list.some(p => p.open)) th = syncedThreads(th, seen.list, seen.paged)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
+        if (seen && seenList === seen) { seenList = null; lastSync = `synced from the model's listing: ${th.length} thread${th.length === 1 ? '' : 's'}` }
         if (job !== undefined && !job.startsWith(TOOL)) { prevJob = undefined; toolJob = '' }
         if (status) lastWrite = status
         say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}`)
@@ -429,7 +435,11 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   let r: ToolResult
   if (probed) { r = probed; probed = null }
   else { try { r = await limit($, $.tool.call({ tool: name } as any) as Promise<ToolResult>, 20000, 'thread listing') } catch { return null } }
-  if (r.deny !== undefined || r.isError) return null
+  return readListing(r)
+}
+// A listing's thread records, from the mod's own call or the model's; partial is set when it has more pages.
+function readListing(r: ToolResult): ProjThread[] | null {
+  if (!r || r.deny !== undefined || r.isError) return null
   partial = /"?next_cursor"?\s*:\s*"[^"]/.test(String(r.text ?? '') + JSON.stringify(r.result ?? null))
   return threadRecords(r.result) || threadRecords(r.text)
 }
@@ -472,13 +482,26 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
     const card = await getCard($, cardId)
     if (!card) return 'card not found'
     const before = threadsOf(card)
+    const kept = syncedThreads(before, list, partial)
+    if (JSON.stringify(kept) === JSON.stringify(before)) return 'in sync'
+    try {
+      await call($, { action: 'update', collection: 'projects', doc_id: cardId, if_version: card.version, data: { threads: kept } })
+      return `synced: ${kept.length} open thread${kept.length === 1 ? '' : 's'}`
+    } catch (err) { if (!isConflict(err)) throw err }
+  }
+  return 'card kept changing; next turn'
+}
+
+// The card's threads made to match a listing (see syncThreadList).
+function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Thread[] {
+  {
     const used = new Set<ProjThread>()
     const kept: Thread[] = []
     for (const t of before) {
       if (!t) continue
       const m = list.find(p => matchesThread(p, t)) || list.find(p => p.name.toLowerCase() === String(t.label || '').toLowerCase())
       const fresh = !m && !!t.at && Date.now() - Date.parse(t.at) < 15 * 60000 && (t.label === PLACEHOLDER || !t.url)
-      if (fresh || (!m && partial)) { kept.push(t); continue }
+      if (fresh || (!m && paged)) { kept.push(t); continue }
       if (!m || !m.open || used.has(m)) continue
       used.add(m)
       kept.push(m.name !== t.label ? { ...t, label: m.name } : t)
@@ -492,13 +515,8 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
       const sid = p.ids.find(i => /^(cse|session)_/.test(i)); if (sid) add.session = sid
       kept.push(add)
     }
-    if (JSON.stringify(kept) === JSON.stringify(before)) return 'in sync'
-    try {
-      await call($, { action: 'update', collection: 'projects', doc_id: cardId, if_version: card.version, data: { threads: kept } })
-      return `synced: ${kept.length} open thread${kept.length === 1 ? '' : 's'}`
-    } catch (err) { if (!isConflict(err)) throw err }
+    return kept
   }
-  return 'card kept changing; next turn'
 }
 
 // A thread keeps its card's thread list in step with the project's threads, after its own status.
@@ -612,7 +630,7 @@ function noteBody(count: boolean, v: string): string {
   if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
   if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). The project's threads keep the card's thread list in step with the open threads at the end of each of their turns, and the mod does the same here. Add no entry for yourself.${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}; if you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}.${listTool ? '' : ' Once in every turn, before your final reply, call the project\'s thread-listing tool (list_thread_sessions or list_threads) with no arguments; the mod reads its result and keeps the card\'s thread list in step with the project\'s open threads. Do not edit the thread list yourself.'} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId || (!told && reportedText)) return `${v}: this chat is not on the Status Board.${told}`
@@ -722,7 +740,8 @@ export const register: Register = on => {
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     const traits = e.traits || []
-    if (!sessionId || traits.includes('teammate') || traits.includes('print')) return r
+    // A one-shot run (-p) gets no note; a Remote Control thread also runs as print, but is on a card.
+    if (!sessionId || traits.includes('teammate') || (traits.includes('print') && !found)) return r
     const text = boardNote(!traits.includes('analysis'))
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })
@@ -750,6 +769,16 @@ export const register: Register = on => {
         if (toolShown && turnActive) { toolShown = false; void setStatus($, 'thinking', RESTORE) }
       }
     }
+  })
+
+  // The model's own call of the thread listing: keep its result for the next status write.
+  on('tool.call', async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined && LIST.test(String(e.tool || ''))) {
+      const list = readListing(r as ToolResult)
+      if (list) { seenList = { list, paged: partial }; trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`) }
+    }
+    return r
   })
 
   // Main-loop turns only.

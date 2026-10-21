@@ -167,6 +167,17 @@ console.log('M5. a thread keeps its card\'s thread list in step with the project
   ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced through the probed tool')
   const dg = E.db.diagnostics['aaaaaaaa-1111-2222-3333-444444444444']
   ok(dg && dg.role === 'thread' && dg.listTool === 'mcp__hearthbot__list_threads' && dg.when === 'turn', 'diagnostic: ' + JSON.stringify(dg && { role: dg.role, listTool: dg.listTool, when: dg.when }))
+  console.log('M5c. without its own listing tool, the mod syncs from the model\'s listing call in the status write; the note asks for that call')
+  E = await env({ db: card([{ ...threads[0], label: 'Mac' }, ...threads.slice(1)]), tools: ['ArtifactData'] })
+  await E.fire('session.start', {}); await settle()
+  ok(/call the project's thread-listing tool/.test(await E.note(['print'])), 'note shown to a print session on a card, asking for the listing')
+  await E.fire('turn.start', {}); await settle()
+  const before = E.writes.length
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: 'Untrusted content follows.\n    ' + JSON.stringify(listing) })
+  await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
+  ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced: ' + E.db.projects.methscope.threads.map(t => t.label).join(','))
+  ok(E.writes.filter(w => w.c === 'projects').length - E.writes.slice(0, before).filter(w => w.c === 'projects').length === 1, 'one card write for status and list together')
+  ok(E.entry('methscope').status === 'idle', 'own status written')
   console.log('M6. a listing with more pages removes nothing')
   E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing: { ...listing, next_cursor: 'abc' } })
   await E.fire('session.start', {}); await settle()
