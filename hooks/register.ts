@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.10'
+const VERSION = '0.9.11'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -54,6 +54,8 @@ let loadedTool = false                   // ToolSearch was tried for ArtifactDat
 let listTool: string | null = null       // the thread-listing tool, '' once probed and absent
 let probed: ToolResult | null = null     // the probe's listing, reused by the first sync
 let partial = false                      // the last listing had more pages: remove nothing on it
+let toolsSeen: string[] = []             // the tool names that matter here, for the diagnostic record
+let lastSync = ''                        // the last thread-list sync's outcome
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -347,9 +349,11 @@ async function listToolName($: Engine): Promise<string> {
   let names: string[] = []
   try { names = (await $.tool.list()).map(t => t.name) } catch {}
   projectTools = names.some(x => PROJECT.test(x))
+  toolsSeen = names.filter(x => /thread|project|rc_|ArtifactData/i.test(x)).slice(0, 20)
   let n = names.find(x => /(^|__)list_threads$/.test(x)) || names.find(x => LIST.test(x)) || ''
-  if (!n && projectTools) {
-    const prefixes = [...new Set(names.filter(x => /__(list|start)_(thread|rc)/.test(x)).map(x => x.slice(0, x.lastIndexOf('__') + 2)))]
+  if (!n) {
+    // The tool list a hook sees may leave out tools the session can still call: try the names.
+    const prefixes = [...new Set(['mcp__hearthbot__', ...names.filter(x => /__(list|start)_(thread|rc)/.test(x)).map(x => x.slice(0, x.lastIndexOf('__') + 2))])]
     for (const cand of prefixes.flatMap(p => [p + 'list_threads', p + 'list_thread_sessions'])) {
       try {
         const r = await limit($, $.tool.call({ tool: cand } as any) as Promise<ToolResult>, 15000, 'thread listing')
@@ -475,7 +479,22 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
 function syncThreads($: Engine): Promise<void> {
   const f = found
   if (!f) return Promise.resolve()
-  return enqueue($, 'thread list sync', async () => { $.ui.status(`board: ${f.name} threads: ${await syncThreadList($, f.cardId)}`) })
+  return enqueue($, 'thread list sync', async () => { lastSync = await syncThreadList($, f.cardId); $.ui.status(`board: ${f.name} threads: ${lastSync}`) })
+}
+
+// What the mod decided and why, in diagnostics/<session id> on the board, since the user cannot see
+// the mod's status line from a project page.
+function diagnose($: Engine, when: string): Promise<void> {
+  if (noBoard || !sessionId) return Promise.resolve()
+  const data = { version: VERSION, at: now(), when, remote: remoteId, role: coordinator ? 'coordinator' : found ? 'thread' : removed ? 'removed' : 'none',
+    card: (coordinator && coordinator.cardId) || (found && found.cardId) || '', label: (found && found.label) || '', listTool: listTool || '',
+    toolsSeen, partial, lastSync, lastWrite, lastError, report, board: BOARD }
+  return enqueue($, 'diagnostic', async () => {
+    const d = await getDoc($, 'diagnostics', sessionId)
+    const args: Record<string, unknown> = { action: 'set', collection: 'diagnostics', doc_id: sessionId, data }
+    if (d) args.if_version = d.version
+    await call($, args)
+  })
 }
 
 // ---- Startup ----
@@ -517,6 +536,7 @@ async function init($: Engine): Promise<void> {
     $.ui.status(`board: could not read the board (${msg(err).slice(0, 60)})`)
   } finally {
     initDone = true
+    void diagnose($, 'start')
   }
 }
 function startInit($: Engine): void { initDone = false; initPromise = init($) }
@@ -524,7 +544,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  prevJob = undefined; toolJob = ''
+  prevJob = undefined; toolJob = ''; lastSync = ''
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -750,6 +770,7 @@ export const register: Register = on => {
         if (seq !== turnSeq) return
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
         if (listTool && found) await syncThreads($)
+        await diagnose($, 'turn')
       } catch (err) { $.ui.status(`board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out

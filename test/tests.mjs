@@ -160,6 +160,13 @@ console.log('M5. a thread keeps its card\'s thread list in step with the project
   ok(th.map(t => t.label).join(',') === 'Mac,Analysis', 'resolved and foreign removed, missing added, own label set: ' + th.map(t => t.label).join(','))
   ok(th[0].status === 'idle' && th[0].transcript, 'own entry keeps its fields')
   ok(th[1].url === U + 'cmsg_B' && th[1].session === 'cse_B', 'added entry has url and session')
+  console.log('M5b. the listing tool is found by trying it when the tool list leaves it out; a diagnostic is written')
+  E = await env({ db: card(threads), tools: ['ArtifactData'], listing })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
+  ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced through the probed tool')
+  const dg = E.db.diagnostics['aaaaaaaa-1111-2222-3333-444444444444']
+  ok(dg && dg.role === 'thread' && dg.listTool === 'mcp__hearthbot__list_threads' && dg.when === 'turn', 'diagnostic: ' + JSON.stringify(dg && { role: dg.role, listTool: dg.listTool, when: dg.when }))
   console.log('M6. a listing with more pages removes nothing')
   E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing: { ...listing, next_cursor: 'abc' } })
   await E.fire('session.start', {}); await settle()
