@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.11.2'
+const VERSION = '0.11.3'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -575,12 +575,6 @@ function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Th
   }
 }
 
-// A thread keeps its card's thread list in step with the project's threads, after its own status.
-function syncThreads($: Engine): Promise<void> {
-  const f = found
-  if (!f) return Promise.resolve()
-  return enqueue($, 'thread list sync', async () => { say($, `board: ${f.name} threads: ${await syncThreadList($, f.cardId)}`) })
-}
 
 // Register this chat from a project listing: on the card holding its project's other threads.
 function placeFrom($: Engine, list: ProjThread[]): Promise<void> {
@@ -659,7 +653,6 @@ async function init($: Engine): Promise<void> {
       try { const d = await getDoc($, 'sessions', sessionId); indexVersion = d ? d.version : null } catch {}
       void setStatus($, turnActive ? 'thinking' : 'idle', undefined, false)
       say($, `board: ${found.name} / ${found.label}`)
-      if (listTool) void syncThreads($)
       void checkMail($, found.cardId)
     } else if (noBoard) {
       report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
@@ -718,18 +711,20 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // Where the mod cannot call the thread listing itself (Remote Control), the model's call feeds it.
-const listAsk = () => listTool ? '' : ' Once in every turn, before your final reply, call the project\'s thread-listing tool (list_thread_sessions or list_threads) with no arguments; the mod uses its result to find this chat\'s card and keep the card\'s thread list in step with the project\'s open threads. Do not edit the thread list yourself.'
+// The card's thread list is synced only when the user asks, with /board-status: the model's listing
+// call then feeds the mod, which places this chat if needed and makes the list match.
+const listAsk = () => ' When the user sends /board-status, call the project\'s thread-listing tool (list_thread_sessions or list_threads) once with no arguments; the mod uses its result to place this chat on its card and make the card\'s thread list match the project\'s open threads. Then tell the user, in a line, what the card shows. Do not edit the thread list yourself, and do not start a thread for it.'
 function noteBody(count: boolean, v: string): string {
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. The project's threads keep the card's thread list in step with the open threads; leave it to them unless the user asks.${IN_PLACE}`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
   if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
   if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). The project's threads keep the card's thread list in step with the open threads at the end of each of their turns, and the mod does the same here. Add no entry for yourself.${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.${listAsk()}${mailNote(found)}`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}).${granted ? '' : ` Board writes in this session need one approval that only your own write can earn: before other work, call ArtifactData with action "set", collection "sessions", doc_id "${sessionId}", data {"card": "${found.cardId}", "label": ${JSON.stringify(found.label)}}${indexVersion !== null ? `, if_version ${indexVersion}` : ''} (on a version mismatch, read that record and write again with its version). Once it is approved, the mod's own status writes go through.`} The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}.${listAsk()}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}).${granted ? '' : ` Board writes in this session need one approval that only your own write can earn: before other work, call ArtifactData with action "set", collection "sessions", doc_id "${sessionId}", data {"card": "${found.cardId}", "label": ${JSON.stringify(found.label)}}${indexVersion !== null ? `, if_version ${indexVersion}` : ''} (on a version mismatch, read that record and write again with its version). Once it is approved, the mod's own status writes go through.`} The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself.${listAsk()}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId || (!told && reportedText)) return `${v}: this chat is not on the Status Board.${told}`
-  return `${v}: this chat is not on the Status Board.${told}${listAsk()} If the mod still finds no card after that, and this chat is work on one of the user's projects: read the board's rules (meta/instruction, field rules), find or create the project's card, add this thread's entry with transcript ${sessionId} and session ${remoteId} (plus label and url), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so later threads register by themselves; the mod then writes this chat's status. If it is not project work, leave the board alone.`
+  return `${v}: this chat is not on the Status Board.${told} Call the project's thread-listing tool (list_thread_sessions or list_threads) once now; the mod uses its result to place this chat on its project's card.${listAsk()} If the mod still finds no card after that, and this chat is work on one of the user's projects: read the board's rules (meta/instruction, field rules), find or create the project's card, add this thread's entry with transcript ${sessionId} and session ${remoteId} (plus label and url), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so later threads register by themselves; the mod then writes this chat's status. If it is not project work, leave the board alone.`
 }
 function describe(): string {
   return describeChat() + ` Board: ${BOARD} (${boardFrom}).`
@@ -810,7 +805,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
-    try { await $.command.register({ name: 'board-status', description: 'Show and update this chat\'s Status Board card, here in this chat (never start a thread for it)' }) } catch {}
+    try { await $.command.register({ name: 'board-status', description: 'Sync this project\'s Status Board card (thread list included), here in this chat (never start a thread for it)' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
     remoteId = await findRemoteId($)
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
@@ -940,9 +935,7 @@ export const register: Register = on => {
         if (!found) { await markUnmatched($); return }
         const d = reason === 'answer' ? await decide($, answer) : { status: 'idle', job: undefined as string | undefined }
         if (seq !== turnSeq) return
-        const fromModel = !!seenList                                 // the status write applies the model's listing
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
-        if (found && !fromModel) await syncThreads($)
         if (found) await checkMail($, found.cardId)
         await markUnmatched($)
       } catch (err) { say($, `board: end of turn failed (${msg(err).slice(0, 60)})`) }

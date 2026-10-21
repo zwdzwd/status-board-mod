@@ -146,7 +146,7 @@ console.log('M. project conversation with list_threads; listing parser: open/clo
   await E.fire('session.start', {}); await settle()
   ok(E.entry('mine')?.session === RID && E.db.projects.methscope.threads.length === 1, 'registered on its project\'s card') }
 
-console.log('M5. a thread keeps its card\'s thread list in step with the project\'s open threads')
+console.log('M5. an ordinary turn leaves the card\'s thread list alone; the listing call on /board-status syncs it')
 { const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
   const threads = [{ label: 'New thread', session: RID, transcript: 'aaaaaaaa-1111-2222-3333-444444444444', status: 'idle' },
     { label: 'Old', session: 'cse_C', url: U + 'cmsg_C' }, { label: 'BoardMac', session: 'cse_OTHER', url: 'https://claude.ai/code/project/chan_2?thread=cmsg_OTHER', at: '2020-01-01T00:00:00Z' }]
@@ -154,15 +154,15 @@ console.log('M5. a thread keeps its card\'s thread list in step with the project
   let E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing, wrap: true })
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
+  ok(E.db.projects.methscope.threads.length === 3, 'plain turn: list untouched')
+  ok(/When the user sends \/board-status, call the project's thread-listing tool/.test(await E.note()), 'note says what /board-status does')
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify(listing) })
+  await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
   const th = E.db.projects.methscope.threads
   ok(th.map(t => t.label).join(',') === 'Mac,Analysis', 'resolved and foreign removed, missing added, own label set: ' + th.map(t => t.label).join(','))
   ok(th[0].status === 'idle' && th[0].transcript, 'own entry keeps its fields')
   ok(th[1].url === U + 'cmsg_B' && th[1].session === 'cse_B', 'added entry has url and session')
-  console.log('M5b. the listing tool is found by trying it when the tool list leaves it out')
-  E = await env({ db: card(threads), tools: ['ArtifactData'], listing })
-  await E.fire('session.start', {}); await settle()
-  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
-  ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced through the probed tool')
   console.log('M5c. without its own listing tool, the mod syncs from the model\'s listing call in the status write; the note asks for that call')
   E = await env({ db: card([{ ...threads[0], label: 'Mac' }, ...threads.slice(1)]), tools: ['ArtifactData'] })
   await E.fire('session.start', {}); await settle()
@@ -184,8 +184,11 @@ console.log('M5. a thread keeps its card\'s thread list in step with the project
   await E.fire('tool.call', { tool: 'ArtifactData', action: 'set', collection: 'sessions' }, { text: 'Database set committed.' })
   ok(!/before other work, call ArtifactData/.test(await E.note()), 'no longer asked once the model wrote')
   console.log('M6. a listing with more pages removes nothing')
-  E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing: { ...listing, next_cursor: 'abc' } })
+  E = await env({ db: card(threads) })
   await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ ...listing, next_cursor: 'abc' }) })
+  await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
   ok(E.db.projects.methscope.threads.some(t => t.label === 'BoardMac'), 'unknown entries kept on a partial listing')
   ok(!E.db.projects.methscope.threads.some(t => t.label === 'Old'), 'a listed resolved thread still goes') }
 
@@ -307,7 +310,7 @@ console.log('N19. Remote Control: the listing comes from the hearthbot server di
     mcpListing: { sessions: [{ session_id: RID, thread_id: 'cmsg_A', title: 'Analysis', status: 'active' }, { session_id: 'cse_W', thread_id: 'cmsg_W', title: 'Writing', status: 'active' }] } })
   await E.fire('session.start', {}); await settle(); await settle()
   ok(E.db.projects.adapt.threads.some(t => t.session === RID), 'placed on AdaptSampling, not BrainRegion')
-  ok(!/call the project's thread-listing tool/.test(await E.note()), 'no listing request to the model') }
+  ok(!/Once in every turn/.test(await E.note()), 'no per-turn listing request to the model') }
 
 console.log('N20. a thread taken off its card by hand places itself again from the listing; a resolved one does not')
 { const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='

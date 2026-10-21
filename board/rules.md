@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.11.2
+# Status Board rules (meta/instruction) — v0.11.3
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -14,18 +14,21 @@ Source of the rules every project reads from the board. To change them, edit thi
 - THE PROJECT CONVERSATION (the coordinator: the session where I give
   the project its tasks and Claude starts threads). It has NO thread
   entry of its own and leaves the card's thread list to the threads:
-  the status-board mod in every thread (v0.9.10 and later) lists the
-  project's threads at the end of each turn and makes the card match
-  the OPEN threads. Touch the thread list only when I ask, matching an
+  when I send /board-status in a thread, that thread lists the
+  project's threads and its mod makes the card match the OPEN threads
+  (v0.11.3 and later; nothing syncs the list on ordinary turns). Touch
+  the thread list only when I ask, matching an
   entry to a thread by the thread id in its url (the ?thread=cmsg_…
   part), never by name, and keeping every other field of entries that
   stay. If an entry on the card carries your session UUID (as
   transcript or coordinator), remove that id from it.
 - A THREAD (a session started for one task; it may run in the cloud
   or on my computer through Remote Control). It owns its own entry:
-  status, jobs, label and url. Its mod also keeps the card's thread
-  list in step with the project's open threads: it removes resolved
-  and foreign entries and adds missing ones. See the mod rules below.
+  status, jobs, label and url. When I send /board-status in it, it
+  calls the project's thread-listing tool (list_thread_sessions or
+  list_threads) once, and its mod makes the card's thread list match
+  the project's open threads: it removes resolved and foreign entries
+  and adds missing ones. See the mod rules below.
 - A REMOTE CONTROL helper session that works for a thread writes that
   thread's entry, never one of its own.
 
