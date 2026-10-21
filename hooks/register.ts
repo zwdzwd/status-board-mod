@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.19'
+const VERSION = '0.9.20'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -45,6 +45,7 @@ let initDone = false                     // the lookup at start has finished
 let initPromise: Promise<void> = Promise.resolve()
 let initFailed = 0                       // lookups that failed on a board error (retried at the next turns)
 let turnActive = false
+let toolDepth = 0                         // shell or remote commands running now
 let turnSeq = 0                          // bumps at every main-loop turn start
 let pendingClear = false                 // a /clear ended the conversation; the thread goes on under a new id
 let busy: Promise<void> = Promise.resolve()   // board writes run one at a time, in order
@@ -187,7 +188,7 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   if (r.missing) { noBoard = true; trace($, 'ArtifactData missing: ' + String(r.text ?? '').slice(0, 160)); throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
-    if (!/^No document /i.test(text)) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`; trace($, 'board error: ' + lastError) }
+    if (!/^No document /i.test(text)) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`; trace($, `board error (${turnActive ? 'in turn' : 'between turns'}, tool running ${toolDepth > 0}): ${String(args.action)} ${String(args.collection ?? '')}: ${text}`) }
     throw new Error(text)
   }
   lastError = ''
@@ -764,7 +765,7 @@ export const register: Register = on => {
 
   // While a command runs on a machine for more than a few seconds (a shell, a remote computer, a
   // browser), the chat is waiting on that machine, not thinking: show it as working.
-  let toolDepth = 0, toolTimer: { cancel: () => void } | null = null, toolShown = false
+  let toolTimer: { cancel: () => void } | null = null, toolShown = false
   on('tool.call', async ($, e, next) => {
     const name = String(e.tool || '')
     // The model's own board write earns the session's approval for the mod's writes too.
