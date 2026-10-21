@@ -89,8 +89,12 @@ it finishes.
     (threads decide the color when they have one)
   - summary: one sentence on where it stands, at most 20 words (the
     card shows two short lines; longer text is cut off)
-  - next: the single next step, at most 12 words, or "" if there is none
-  - blocker: what it is waiting on, at most 12 words, or "" if none
+  - next: the single next step, at most 12 words, or "" if there is
+    none. When the project is waiting on someone other than me, say so
+    here, naming them: "Waiting on Hao: commit S2a and 3b".
+  - blocker: only what is waiting on ME (a decision, a review, an
+    answer), at most 12 words, or "" if nothing is. The board shows it
+    in red as "Waiting on you"; never put someone else's task here.
   - threads: [{label, url, session, transcript, status, at, jobs,
     waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the
