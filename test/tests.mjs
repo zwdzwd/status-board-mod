@@ -413,6 +413,17 @@ console.log('N25. second review: tolerant listing parser, unmatched reason, jobs
   await E.fire('turn.start', {}); await settle()
   ok(E.entry('methscope').status === 'thinking', 'write retried after a no-verdict refusal') }
 
+console.log('N26. waiting on you always carries a line; a summary of NONE means idle')
+{ const E = await env({ db: card([{ label: 'HPC', session: R }]) })
+  await E.fire('session.start', {}); await settle()
+  E.state.classify = 0; E.state.summary = 'NONE'
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'All done. Nothing else needed.', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').status === 'idle', 'NONE summary: idle')
+  E.state.summary = undefined
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'The draft is ready. Please review section 2 before Friday.', reason: 'answer' }); await settle()
+  const t = E.entry('methscope')
+  ok(t.status === 'waiting_on_you' && /review section 2/.test(t.waiting || ''), 'no summary: the last sentence stands in: ' + t.waiting) }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()

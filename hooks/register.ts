@@ -8,7 +8,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.12.4'
+const VERSION = '0.12.5'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -734,10 +734,13 @@ async function decide($: Engine, answer: string): Promise<{ status: string; wait
   if (!answer.trim()) return { status: 'idle' }
   let k: string | undefined
   try { k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, OTHER]) } catch {}
-  if (k === ASK) return { status: 'waiting_on_you', waiting: await askedFor($, answer) }
-  if (k === OTHER) return { status: 'idle' }
   const last = answer.trim().split('\n').pop() || ''
-  if (/\?\s*$/.test(last)) return { status: 'waiting_on_you', waiting: lastQuestion(answer) }
+  if (k === ASK || (k === undefined && /\?\s*$/.test(last))) {
+    // Waiting on the user always comes with a line saying what for; a summary that finds nothing
+    // asked means the message asks nothing after all.
+    const w = await askedFor($, answer)
+    return w ? { status: 'waiting_on_you', waiting: w } : { status: 'idle' }
+  }
   return { status: 'idle' }
 }
 
@@ -756,11 +759,12 @@ async function askedFor($: Engine, answer: string): Promise<string> {
     const r = await limit($, $.model.complete({
       model: 'haiku',
       maxTokens: 60,
-      prompt: `Below is an assistant's last message to a user. In at most 12 words, say what the user needs to do or decide next, as an imperative (for example "Push the repo and restart Claude in MethScope" or "Choose between the two figure layouts"). Reply with that line only.\n\n<message>\n${answer.slice(-4000)}\n</message>`,
+      prompt: `Below is an assistant's last message to a user. In at most 12 words, say what the user needs to do or decide next, as an imperative (for example "Push the repo and restart Claude in MethScope" or "Choose between the two figure layouts"). If the message asks nothing of the user, reply NONE. Reply with that line only.\n\n<message>\n${answer.slice(-4000)}\n</message>`,
     }), 15000, 'summary')
-    if (r.isAnswered && r.text && r.text.trim()) return oneLine(r.text)
+    if (r.isAnswered && r.text && r.text.trim()) { const t = oneLine(r.text); return /^none\b/i.test(t) ? '' : t }
   } catch {}
-  return lastQuestion(answer)
+  // No summary: the last question, or else the message's last sentence, so the card always says what.
+  return lastQuestion(answer) || oneLine((answer.replace(/`[^`]*`/g, '').match(/[^.!?\n]{3,}[.!?]?/g) || ['']).pop() || '')
 }
 
 // A background command shown on the shared board (a job with no description): the program and up to

@@ -150,7 +150,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.12.4";
+  const VERSION = "0.12.5";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -301,8 +301,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   let tipTimer = null, tipFor = null;
   // What the chats waiting on you ask for, as "Label: request" (the plugin writes it with the status).
   function asks(p){
-    return arr(p.threads).filter(t => t && typeof t.waiting === "string" && t.waiting.trim() && (threadState(t) || {}).key === "waiting")
-      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).map(t => (t.label || "Thread") + ": " + t.waiting.trim());
+    // Every thread waiting on you is named, with its line or, from an older plugin without one, a pointer to the thread.
+    return arr(p.threads).filter(t => t && (threadState(t) || {}).key === "waiting")
+      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))
+      .map(t => (t.label || "Thread") + ": " + (typeof t.waiting === "string" && t.waiting.trim() ? t.waiting.trim() : "waiting on you; see the thread"));
   }
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
