@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.17'
+const VERSION = '0.9.18'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -709,10 +709,12 @@ export const register: Register = on => {
   on('tool.check', ($, e, next) => {
     const base = (n: unknown) => String(n || '').split('@')[0]?.split('/').pop() ?? ''
     const o = base(next.origin && next.origin.plugin)
-    if (e.tool === 'ArtifactData') trace($, `tool.check ArtifactData: origin ${JSON.stringify(next.origin)}, plugin ${$.plugin.name}, own ${!!o && (o === base($.plugin.name) || o === PLUGIN)}`)
+    const input0 = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
+    if (/artifact/i.test(String(e.tool)) || o) trace($, `tool.check ${e.tool}: origin ${JSON.stringify(next.origin)}, plugin ${$.plugin.name}, url ${String(input0.url ?? '')}`)
     if (!o || (o !== base($.plugin.name) && o !== PLUGIN)) return next(e)
     const input = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
-    const ok = (e.tool === 'ArtifactData' && input.url === BOARD)
+    // The board tool by any name the host gives it (ArtifactData, or a prefixed form of it).
+    const ok = (/(^|__)ArtifactData$/.test(String(e.tool)) && input.url === BOARD)
       || LIST.test(e.tool)
       || (e.tool === 'ToolSearch' && input.query === 'select:ArtifactData')
     return ok ? { decision: 'allow' as const } : next(e)
