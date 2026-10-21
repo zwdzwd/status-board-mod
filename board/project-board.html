@@ -77,7 +77,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn.t-working{color:var(--ok);background:var(--ok-soft)} .tbtn.t-working:hover{border-color:var(--ok)}
 .tbtn.t-waiting{color:var(--bad);background:var(--bad-soft)} .tbtn.t-waiting:hover{border-color:var(--bad)}
 .tbtn.t-idle{color:var(--idle);background:var(--idle-soft)} .tbtn.t-idle:hover{border-color:var(--idle)}
-.tbtn.t-ended{color:var(--muted);background:transparent;border:1px dashed var(--line);opacity:.7}
 .tbtn .tdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px;box-sizing:border-box}
 .tbtn.stale{border:1px dashed currentColor;opacity:.75}
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
@@ -261,11 +260,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     return S;
   }
   const endedAfterAt = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
-  // A thread is quiet when its session ended after its last activity, or nothing happened for 8 hours.
-  const quiet = t => !!endedAfterAt(t) || (!!t.at && Date.now() - Date.parse(t.at) > 8*3600000);
   const ORDER = ["waiting","thinking","working","idle"];
   function cardKey(p){
-    const ks = arr(p.threads).filter(t => t && !quiet(t)).map(threadState).filter(Boolean).map(s => s.key);
+    const ks = arr(p.threads).filter(Boolean).map(threadState).filter(Boolean).map(s => s.key);
     for (const k of ORDER) if (ks.includes(k)) return k;
     return stKey(p.status);
   }
@@ -283,14 +280,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     c.append(top);
     // Body: summary / next / blockers, then the thread buttons along the bottom (at most 4, then "… +N").
     const body = el("div",{class:"body"}); c.append(body);
-    // Threads active in the last 8 hours (and not ended since) get buttons; quiet ones wait in the opened card.
-    const every = arr(p.threads).filter(t => t && (safe(t.url) || t.label)), all = every.filter(t => !quiet(t)), q = every.length - all.length;
+    const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
     const r = el("div",{class:"threads"});
     const shown = all.length > 4 ? all.slice(0, 3) : all;
     shown.forEach(t => r.append(threadButton(t)));
     if (all.length > 4) r.append(el("span",{class:"tbtn more",title:all.slice(3).map(t => t.label||"Thread").join(", ") + " — hover the card for all " + all.length,text:"\u2026 +" + (all.length - 3)}));
-    if (q) r.append(el("span",{class:"tbtn more",title:"Quiet threads: no activity for 8 hours, or their session ended. Click the card to see them.",text:q + " quiet"}));
-    if (!every.length) r.append(el("span",{class:"line muted",text:"No threads"}));
+    if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
     const txt = el("div",{class:"text"}); body.append(txt);
     if (p.summary) txt.append(el("p",{class:"line sum",text:p.summary}));
     // The Next line always shows; with no next step (an empty field) it says None.
@@ -344,13 +339,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   addEventListener("resize", hideTip);
 
   function threadButton(t){
-    const s = threadState(t), tk = quiet(t) ? "ended" : (s ? s.key : ""), stale = staleWork(t, s), jobs = jobsOf(t);
+    const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s), jobs = jobsOf(t);
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
-    const state = tk === "ended" ? "quiet, " + when : (tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") : "");
+    const state = tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") : "";
     const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
-    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "")}, tk && tk !== "ended" ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), light);
+    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), light);
   }
 
   function render(){

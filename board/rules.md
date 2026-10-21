@@ -63,11 +63,10 @@ does the per-turn bookkeeping by itself:
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
     the start of each fresh session;
-  - it stamps the entry ended when the session ends. The board gives a
-    thread a button while it has been active in the last 8 hours and
-    its session has not ended since; otherwise the thread is quiet
-    (counted on the card, listed when the card is opened) and comes
-    back when used again.
+  - it stamps the entry ended when the session ends (shown in the
+    thread button's tooltip). Every open thread keeps its button; a
+    card with more than four shows three and a "+N" count, all listed
+    when the card is opened.
 Where the status-board plugin is not installed, do that bookkeeping yourself: write status
 "thinking" before other work and the end state after the reply is
 settled, each with at = ISO now; set jobs to the background work
