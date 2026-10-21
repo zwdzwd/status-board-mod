@@ -104,7 +104,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
 .unmatched b{font-weight:600}
 .note{display:flex;flex-direction:column;gap:1px;margin-top:4px}
-.chain{border-left:2px solid var(--line);padding-left:6px;margin-top:4px}
+.chain{border-left:2px solid var(--line);padding-left:6px;margin-top:6px}
+.chain>summary{cursor:pointer;list-style:none;display:flex;flex-direction:column;gap:1px}
+.chain>summary::-webkit-details-marker{display:none}
+.chain>summary .subj{font-size:12.5px;font-weight:500}
+.chain[open]>summary .subj{display:none}
+.chain.settled{opacity:.8}
 .notes{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 10px 8px;max-height:45vh;overflow:auto}
 .btn.hot{border-color:var(--bad);color:var(--bad)}
 .note.reply,.meta.reply{margin-left:10px}
@@ -189,6 +194,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   }
   // All notes between projects in one place: each conversation once, open ones first.
   let notesOpen = false;
+  const folds = {};   // which conversations the viewer folded or unfolded, by first note id
   try { notesOpen = localStorage.getItem("sb-notes") === "1"; } catch(e){}
   function renderNotes(){
     const n = unread().length, btn = $("notesBtn");
@@ -201,18 +207,19 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     if (!chains.length){ box.append(el("p",{class:"muted",text:"No notes between projects."})); return; }
     const pname = id => { const q = projects.find(x => x.id === id); return q ? (q.name || q.id) : id; };
     const route = (m, extra) => el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:extra}));
-    // An open conversation shows its first note and its latest two; the ones between fold to a count.
-    open.forEach(c => { const chain = el("div",{class:"chain"}), k = c.notes.length;
-      c.notes.forEach((m, i) => {
-        if (k > 3 && i > 0 && i < k - 2){ if (i === 1) chain.append(el("p",{class:"meta reply",text:"… " + (k - 3) + " more"})); return; }
-        const fresh = !m.read_at;
-        chain.append(el("div",{class:"note" + (i ? " reply" : "") + (fresh ? " unread" : "")}, route(m, ago(m.at) + (fresh ? " · unread" : "")), el("p",{text:m.subject || ""}))); });
-      box.append(chain); });
-    // Settled conversations (every note read) fold to a line each, with a link that clears them.
-    done.forEach(c => { const m = c.notes[0];
-      const clear = el("button",{class:"linkbtn",type:"button",title:"Hide this conversation from the board (the notes stay in the data)",text:"clear"});
-      clear.addEventListener("click", () => clearChain(c));
-      box.append(el("div",{class:"note settled"}, route(m, c.notes.length + " note" + (c.notes.length === 1 ? "" : "s") + ", settled " + ago(c.last)), el("p",null, (m.subject || "") + " ", clear))); });
+    // Each conversation is a foldable block: the summary line names who wrote to whom, how many notes,
+    // when the last came and the first subject; open ones start unfolded, settled ones folded.
+    [...open, ...done].forEach(c => { const m = c.notes[0], k = c.notes.length, key = m.id, waiting = c.notes.filter(x => !x.read_at).length;
+      const d = el("details",{class:"chain" + (c.settled ? " settled" : "")});
+      d.open = key in folds ? folds[key] : !c.settled;
+      d.addEventListener("toggle", () => { folds[key] = d.open; });
+      const sum = el("summary",null, route(m, k + " note" + (k === 1 ? "" : "s") + " · " + ago(c.last) + (waiting ? " · " + waiting + " unread" : " · settled")), el("span",{class:"subj",text:m.subject || ""}));
+      if (c.settled){ const clear = el("button",{class:"linkbtn",type:"button",title:"Hide this conversation from the board (the notes stay in the data)",text:"clear"});
+        clear.addEventListener("click", ev => { ev.preventDefault(); clearChain(c); }); sum.append(" ", clear); }
+      d.append(sum);
+      c.notes.forEach((x, i) => { const fresh = !x.read_at;
+        d.append(el("div",{class:"note" + (i ? " reply" : "") + (fresh ? " unread" : "")}, route(x, ago(x.at) + (fresh ? " · unread" : "")), el("p",{text:x.subject || ""}))); });
+      box.append(d); });
   }
   async function clearChain(c){
     if (!dbRef) return;
