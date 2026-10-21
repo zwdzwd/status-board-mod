@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.12.3
+# Status Board rules (meta/instruction) — v0.12.4
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -46,10 +46,11 @@ does the per-turn bookkeeping by itself:
     threads, as the project's thread list shows them. A repository or
     folder match alone never places a thread, since several projects
     share one (writing, labjournal). The mod fetches that list itself
-    where it can; on Mac Remote Control only the thread's own listing
-    call (/board-status) reaches it. A thread it cannot place goes on
-    the board's "unmatched" list (shown in red at the top), never on a
-    guessed card. The listing also names the entry and fills in its
+    where it can; on Remote Control (Mac and HPC) only the thread's own
+    listing call (/board-status) reaches it, so a fresh thread there
+    waits for /board-status. A thread a listing could not place goes
+    on the board's "unmatched" list (shown in red at the top), never on
+    a guessed card. The listing also names the entry and fills in its
     link. Add or edit a thread's entry by hand only when I ask; never
     invent a label, and keep ONE ENTRY PER THREAD;
   - it writes the thread's status: "thinking" while Claude is on a

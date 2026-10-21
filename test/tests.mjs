@@ -316,17 +316,18 @@ console.log('N20. a thread taken off its card by hand places itself again from t
   await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
   ok(!E.db.projects.mine.threads.some(t => t.session === RID), 'a resolved thread stays off') }
 
-console.log('N21. a thread the mod cannot place is recorded as unmatched, and the record goes once it is placed')
-{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa'
-  const E = await env({ db: card([]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
+console.log('N21. a fresh thread no listing has reached shows no warning; a stale unmatched record goes once the thread is placed')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'aaaaaaaa-1111-2222-3333-444444444444'
+  const E = await env({ db: { ...card([]), unmatched: { [U]: { session: RID, why: 'old', at: '2026-10-21T00:00:00Z' } } }, repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()
+  delete E.db.unmatched[U]
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
-  const u = (E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444']
-  ok(u && u.session === RID && /not reachable/.test(u.why), 'unmatched recorded: ' + JSON.stringify(u))
+  ok(!(E.db.unmatched || {})[U], 'no warning before any listing')
+  E.db.unmatched[U] = { session: RID, why: 'old', at: '2026-10-21T00:00:00Z' }
   await E.fire('turn.start', {}); await settle()
   await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }) }); await settle()
   await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
-  ok(E.entry('methscope') && !(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'placed, record removed') }
+  ok(E.entry('methscope') && !(E.db.unmatched || {})[U], 'placed, stale record removed') }
 
 console.log('N22. review fixes: own entry kept by the sync, a paged listing evicts nothing, a resolved thread is not shown as unmatched')
 { const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='

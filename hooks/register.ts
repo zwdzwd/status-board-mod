@@ -8,7 +8,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.12.3'
+const VERSION = '0.12.4'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -595,10 +595,12 @@ async function unmatched($: Engine): Promise<void> {
       unmatchedWritten = false; unmatchedChecked = true
       return
     }
-    if (!remoteId) return
+    // Only a thread a listing could not place is shown: a fresh Remote Control thread, which no
+    // listing has reached yet, waits for /board-status without a warning on the board.
+    if (!remoteId || (!unmatchedWhy && !listTool)) return
     let folder = ''
     try { folder = await $.session.cwd() } catch {}
-    const why = unmatchedWhy || (listTool ? 'no card holds this project\'s threads' : 'the thread listing is not reachable from the mod here; /board-status places this thread')
+    const why = unmatchedWhy || 'no card holds this project\'s threads'
     const d = await getDoc($, 'unmatched', sessionId)
     if (d && d.data.why === why) { unmatchedWritten = true; return }
     const args: Record<string, unknown> = { action: 'set', collection: 'unmatched', doc_id: sessionId, data: { session: remoteId, transcript: sessionId, folder, why, version: VERSION, at: now() } }

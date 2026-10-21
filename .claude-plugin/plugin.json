@@ -1,1 +1,1 @@
-{ "name": "status-board", "version": "0.12.3", "description": "Keeps each thread's status on the Status Board current by itself (thinking / waiting on you / idle, plus its running background jobs), registers new threads on their project's card, and marks ended ones." }
+{ "name": "status-board", "version": "0.12.4", "description": "Keeps each thread's status on the Status Board current by itself (thinking / waiting on you / idle, plus its running background jobs), registers new threads on their project's card, and marks ended ones." }
