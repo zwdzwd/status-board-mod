@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.8'
+const VERSION = '0.9.9'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -14,6 +14,8 @@ const FALLBACK = 'https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T'
 let BOARD = FALLBACK
 let boardFrom = 'built in'
 const NOTE_ID = 'status-board:note'
+// /board-status is handled in the chat where it is typed; a project conversation must not start a thread for it.
+const IN_PLACE = ' When the user sends /board-status, answer it in this chat and update this project\'s card yourself by the board\'s rules; never start a thread for it.'
 const PLACEHOLDER = 'New thread'
 // The project's thread listing, under either name; threads have one too.
 const LIST = /(^|__)(list_threads|list_thread_sessions)$/
@@ -547,10 +549,10 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 function noteBody(count: boolean, v: string): string {
-  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. Keep the card's thread list in step with the project's threads as the board's rules say.`
+  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. Keep the card's thread list in step with the project's threads as the board's rules say.${IN_PLACE}`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
-  if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.`
-  if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). At the end of each turn the mod tries to make the card's thread list match the project's open threads; if the list still looks wrong, fix it by the board's rules. Add no entry for yourself.`
+  if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
+  if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). At the end of each turn the mod tries to make the card's thread list match the project's open threads; if the list still looks wrong, fix it by the board's rules. Add no entry for yourself.${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.`
   if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself; if you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
@@ -564,7 +566,7 @@ function describe(): string {
 function describeChat(): string {
   if (!initDone) return 'Status Board: still looking up this chat.'
   if (noBoard) return 'Status Board: this session has no ArtifactData tool; the mod writes nothing from here.'
-  if (coordinator) return coordinator.cardId ? `Status Board: project conversation for the ${coordinator.name} card.` : 'Status Board: project conversation; no card matched.'
+  if (coordinator) return (coordinator.cardId ? `Status Board: project conversation for the ${coordinator.name} card.` : 'Status Board: project conversation; no card matched.') + ' Update the card here yourself if needed; do not start a thread for this command.'
   if (found) return `Status Board: this chat is "${found.label}" on the ${found.name} card.${lastWrite ? ` Last status written: ${lastWrite.replace(/_/g, ' ')}.` : ''}`
   if (removed) return 'Status Board: this chat\'s entry was taken off its card.'
   return `Status Board: this chat is not on the board (transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}).${report ? ' ' + report + '.' : ''}`
@@ -636,7 +638,7 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
-    try { await $.command.register({ name: 'board-status', description: 'Show which Status Board card and thread this chat updates' }) } catch {}
+    try { await $.command.register({ name: 'board-status', description: 'Show and update this chat\'s Status Board card, here in this chat (never start a thread for it)' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
     try { remoteId = (await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID')) || '' } catch {}
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
