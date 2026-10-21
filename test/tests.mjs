@@ -349,6 +349,18 @@ console.log('N22. review fixes: own entry kept by the sync, a paged listing evic
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
   ok(!(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'resolved thread not recorded as unmatched') }
 
+console.log('N23. an entry that carries only this thread\'s link is claimed, not duplicated')
+{ const RID = 'cse_01Tvs66rBJwAKEbsBc9LPv2b', U = 'https://claude.ai/code/project/chan_1?thread='
+  const E = await env({ db: { projects: { adapt: { name: 'AdaptSampling', threads: [{ label: 'Analysis', url: U + 'cmsg_A' }, { label: 'Writing', session: 'cse_W', url: U + 'cmsg_W' }] } } }, remote: '', ps: '--session-id ' + RID })
+  await E.fire('session.start', {}); await settle()
+  for (let i = 0; i < 2; i++) {
+    await E.fire('turn.start', {}); await settle()
+    await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_A', title: 'Analysis', status: 'active' }, { session_id: 'cse_W', thread_id: 'cmsg_W', title: 'Writing', status: 'active' }] }) }); await settle()
+    await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  }
+  const th = E.db.projects.adapt.threads
+  ok(th.length === 2 && th[0].label === 'Analysis' && th[0].session === RID && th[0].transcript && th[0].status === 'idle', 'Analysis claimed and written: ' + JSON.stringify(th.map(t => [t.label, t.session, t.status]))) }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()

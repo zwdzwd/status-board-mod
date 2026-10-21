@@ -8,7 +8,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.12.0'
+const VERSION = '0.12.1'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -34,6 +34,7 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 // ---- State of this session ----
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
+let threadId = ''                        // this thread's cmsg_ id, once a listing has named it
 let found: Found | null = null           // this chat's card and entry
 let removed = false                      // the entry was taken off the card (the thread was resolved)
 let lastWrite = ''                       // the last status written, for /board-info
@@ -78,8 +79,9 @@ function same(a: unknown, b: unknown): boolean {
   if (x === y) return true
   return Math.min(x.length, y.length) >= 20 && (x.endsWith(y) || y.endsWith(x))
 }
-const myIds = () => [sessionId, remoteId].filter(Boolean)
-const isMine = (t: Thread, ids: string[]) => !!t && ids.some(id => same(t.transcript, id) || same(t.session, id))
+const myIds = () => [sessionId, remoteId, threadId].filter(Boolean)
+// An entry is this chat's by its transcript, its session, or the thread id in its link.
+const isMine = (t: Thread, ids: string[]) => !!t && ids.some(id => same(t.transcript, id) || same(t.session, id) || same(threadIdOf(t), id))
 const mine = (t: Thread) => isMine(t, myIds())
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
 const threadsOf = (c: Card): Thread[] => Array.isArray(c.data.threads) ? (c.data.threads as Thread[]) : []
@@ -474,7 +476,12 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
 function readListing(r: ToolResult): ProjThread[] | null {
   if (!r || r.deny !== undefined || r.isError) return null
   partial = /"?next_cursor"?\s*:\s*"[^"]/.test(String(r.text ?? '') + JSON.stringify(r.result ?? null))
-  return threadRecords(r.result) || threadRecords(r.text)
+  const list = threadRecords(r.result) || threadRecords(r.text)
+  // The listing names this chat's thread: its cmsg_ id identifies an entry that has only a link.
+  const me = list && remoteId ? list.find(p => p.ids.some(i => same(i, remoteId))) : null
+  const tid = me ? me.ids.find(i => /^cmsg_/.test(i)) : ''
+  if (tid) threadId = tid
+  return list
 }
 
 const threadIdOf = (t: Thread) => /[?&]thread=([A-Za-z0-9_]+)/.exec(String(t.url || ''))?.[1] ?? ''
