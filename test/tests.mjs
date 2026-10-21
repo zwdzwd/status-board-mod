@@ -300,6 +300,42 @@ console.log('N18. the note shows the unread notes for the thread\'s card, and dr
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
   ok(!/unread note/.test(await E.note()), 'gone once read') }
 
+console.log('N19. Remote Control: the listing comes from the hearthbot server directly; the thread places itself at start')
+{ const RID = 'cse_01RCmcpaaaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const E = await env({ db: { projects: { adapt: { name: 'AdaptSampling', threads: [{ label: 'Writing', url: U + 'cmsg_W' }] }, brain: { name: 'BrainRegion', repo: 'zhou-lab/labjournal', threads: [{ label: 'B', session: 'cse_B' }] } } },
+    remote: '', ps: '--session-id ' + RID, repo: { remote: 'git@github.com:zhou-lab/labjournal.git', root: '/hpc/labjournal' },
+    mcpListing: { sessions: [{ session_id: RID, thread_id: 'cmsg_A', title: 'Analysis', status: 'active' }, { session_id: 'cse_W', thread_id: 'cmsg_W', title: 'Writing', status: 'active' }] } })
+  await E.fire('session.start', {}); await settle(); await settle()
+  ok(E.db.projects.adapt.threads.some(t => t.session === RID), 'placed on AdaptSampling, not BrainRegion')
+  ok(!/call the project's thread-listing tool/.test(await E.note()), 'no listing request to the model') }
+
+console.log('N20. a thread taken off its card by hand places itself again from the listing; a resolved one does not')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const sessions = [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }, { session_id: 'cse_W', thread_id: 'cmsg_W', title: 'Writing', status: 'active' }]
+  const E = await env({ db: { projects: { mine: { name: 'Mine', threads: [{ label: 'Me', session: RID }, { label: 'Writing', session: 'cse_W', url: U + 'cmsg_W' }] } } }, tools: ['ArtifactData', 'mcp__hb__list_threads'], listing: { sessions } })
+  await E.fire('session.start', {}); await settle()
+  E.db.projects.mine.threads = E.db.projects.mine.threads.filter(t => t.session !== RID)
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(E.db.projects.mine.threads.some(t => t.session === RID), 'back on its card')
+  E.db.projects.mine.threads = E.db.projects.mine.threads.filter(t => t.session !== RID)
+  E.state.listing = { sessions: [{ ...sessions[0], resolved: true }, sessions[1]] }
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(!E.db.projects.mine.threads.some(t => t.session === RID), 'a resolved thread stays off') }
+
+console.log('N21. a thread the mod cannot place is recorded as unmatched, and the record goes once it is placed')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa'
+  const E = await env({ db: card([]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  const u = (E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444']
+  ok(u && u.session === RID && /not reachable/.test(u.why), 'unmatched recorded: ' + JSON.stringify(u))
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }) }); await settle()
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(E.entry('methscope') && !(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'placed, record removed') }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()

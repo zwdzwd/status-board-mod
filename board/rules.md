@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.11.1
+# Status Board rules (meta/instruction) — v0.11.2
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -38,7 +38,10 @@ does the per-turn bookkeeping by itself:
     transcript = the UUID) on the card that holds the project's other
     threads, as the project's thread list shows them. A repository or
     folder match alone never places a thread, since several projects
-    share one (writing, labjournal). On your first turn, fix that entry's label (the
+    share one (writing, labjournal). The mod fetches that list itself,
+    through the hearthbot server where the tool call is refused; a
+    thread it cannot place goes on the board's "unmatched" list (shown
+    in red at the top), never on a guessed card. On your first turn, fix that entry's label (the
     thread's name as the project's thread list shows it) and url (this
     thread's link), touching nothing else. When the mod says it could
     not match a card (a folder shared by several projects, such as the

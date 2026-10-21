@@ -95,6 +95,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip .meta{margin:0}
 .skillbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
 .skillbox pre{margin:0;font-family:var(--f-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;user-select:all}
+.unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
+.unmatched b{font-weight:600}
 [hidden]{display:none!important}
 </style>
 
@@ -108,6 +110,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">Copy skill setup</button></div>
   </header>
 
+  <div id="unmatched" class="unmatched" hidden></div>
   <div id="board" aria-live="polite">
     <div class="empty">Loading projects…</div>
   </div>
@@ -151,6 +154,14 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     ].join("\n");
   }   // one version for board, mod and rules; bump all three together
   let projects = [];
+  // Threads the mod could not place on any card (collection "unmatched"), shown so nothing is guessed.
+  function renderUnmatched(rows){
+    const box = $("unmatched"), recent = rows.filter(r => r.at && Date.now() - Date.parse(r.at) < 24*3600000);
+    box.hidden = !recent.length; box.replaceChildren();
+    if (!recent.length) return;
+    box.append(el("b",{text:recent.length + " thread" + (recent.length === 1 ? "" : "s") + " not on any card"}));
+    recent.forEach(r => box.append(el("span",{text:(r.folder || "unknown folder") + " (" + (r.session || r.id) + ", " + ago(r.at) + "): " + (r.why || "")})));
+  }
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
     if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
@@ -307,6 +318,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   (async function start(){
     const db = await claude.use("db");
     if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
+    db.collection("unmatched").onSnapshot(snap => renderUnmatched(snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(snap => {
       projects = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()));
       // Threads still on the old rule write only the card's status; color those threads from it.

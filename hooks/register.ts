@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.11.1'
+const VERSION = '0.11.2'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -417,8 +417,18 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
 // tool is found by name, or by trying the names under the project tools' prefix. A thread has a
 // listing too, which finds its card and keeps the card's thread list in sync. In practice project
 // conversations have no ArtifactData, so the sync below only runs where both tools exist.
+// One call of the project's thread listing: the tool by name, or the hearthbot server directly
+// ("mcp:<tool>"), which a hook can reach where $.tool.call cannot (Remote Control).
+async function callListing($: Engine, name: string): Promise<ToolResult> {
+  if (name.startsWith('mcp:')) {
+    const r = await limit($, $.mcp.call('hearthbot', name.slice(4)), 20000, 'thread listing')
+    return { isError: r.isError, text: r.content.map(b => String((b as { text?: unknown }).text ?? '')).join('\n'), result: r.structuredContent }
+  }
+  return await limit($, $.tool.call({ tool: name } as any) as Promise<ToolResult>, 20000, 'thread listing')
+}
+let listProbedAt = 0                     // when a probe last found no listing; tried again a minute on
 async function listToolName($: Engine): Promise<string> {
-  if (listTool !== null) return listTool
+  if (listTool !== null && (listTool || Date.now() - listProbedAt < 60000)) return listTool
   let names: string[] = []
   try { names = (await $.tool.list()).map(t => t.name) } catch {}
   projectTools = names.some(x => PROJECT.test(x))
@@ -426,13 +436,17 @@ async function listToolName($: Engine): Promise<string> {
   if (!n) {
     // The tool list a hook sees may leave out tools the session can still call: try the names.
     const prefixes = [...new Set(['mcp__hearthbot__', ...names.filter(x => /__(list|start)_(thread|rc)/.test(x)).map(x => x.slice(0, x.lastIndexOf('__') + 2))])]
-    for (const cand of prefixes.flatMap(p => [p + 'list_threads', p + 'list_thread_sessions'])) {
+    const why: string[] = []
+    for (const cand of [...prefixes.flatMap(p => [p + 'list_threads', p + 'list_thread_sessions']), 'mcp:list_thread_sessions', 'mcp:list_threads']) {
       try {
-        const r = await limit($, $.tool.call({ tool: cand } as any) as Promise<ToolResult>, 15000, 'thread listing')
-        if (r && r.deny === undefined && !r.isError) { n = cand; probed = r; break }
-      } catch {}
+        const r = await callListing($, cand)
+        if (r && r.deny === undefined && !r.isError && readListing(r)) { n = cand; probed = r; break }
+        why.push(`${cand}: ${String(r?.deny ?? r?.text ?? 'no listing').slice(0, 80)}`)
+      } catch (err) { why.push(`${cand}: ${msg(err).slice(0, 80)}`) }
     }
+    trace($, n ? `thread listing through ${n}` : `no thread listing reachable (${why.join('; ')})`)
   }
+  if (!n) listProbedAt = Date.now()
   listTool = n
   return n
 }
@@ -474,7 +488,7 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   if (!name) return null
   let r: ToolResult
   if (probed) { r = probed; probed = null }
-  else { try { r = await limit($, $.tool.call({ tool: name } as any) as Promise<ToolResult>, 20000, 'thread listing') } catch { return null } }
+  else { try { r = await callListing($, name) } catch { return null } }
   return readListing(r)
 }
 // A listing's thread records, from the mod's own call or the model's; partial is set when it has more pages.
@@ -572,11 +586,42 @@ function syncThreads($: Engine): Promise<void> {
 function placeFrom($: Engine, list: ProjThread[]): Promise<void> {
   return enqueue($, 'registration', async () => {
     if (found) return
+    // A thread the listing shows resolved stays off the board; one taken off a card by hand returns.
+    const me = list.find(p => p.ids.some(i => myIds().some(m => same(i, m))))
+    if (me && !me.open) return
     const c = await threadCard($, await cards($), list)
-    if (!c) return
+    if (!c) { unmatchedWhy = skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card holds this project\'s threads'; return }
     found = await registerThread($, c)
-    if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the project's thread list`) }
+    if (found) { removed = false; registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the project's thread list`) }
   })
+}
+
+// A thread the mod cannot place shows on the board as unmatched (collection "unmatched"), never on a
+// guessed card; the record goes once the thread is placed.
+let unmatchedWhy = ''
+let unmatchedWritten = false
+async function markUnmatched($: Engine): Promise<void> {
+  if (noBoard || !sessionId || coordinator) return
+  try {
+    if (found) {
+      if (!unmatchedWritten) return
+      const d = await getDoc($, 'unmatched', sessionId)
+      if (d) await call($, { action: 'delete', collection: 'unmatched', doc_id: sessionId, if_version: d.version })
+      unmatchedWritten = false
+      return
+    }
+    if (!remoteId) return
+    let folder = ''
+    try { folder = await $.session.cwd() } catch {}
+    const why = listTool ? (unmatchedWhy || 'no card holds this project\'s threads') : 'the thread listing is not reachable from the mod here'
+    const d = await getDoc($, 'unmatched', sessionId)
+    if (d && d.data.why === why) { unmatchedWritten = true; return }
+    const args: Record<string, unknown> = { action: 'set', collection: 'unmatched', doc_id: sessionId, data: { session: remoteId, transcript: sessionId, folder, why, version: VERSION, at: now() } }
+    if (d) args.if_version = d.version
+    await call($, args)
+    unmatchedWritten = true
+    trace($, 'unmatched: ' + why)
+  } catch {}
 }
 
 // The unread notes addressed to a card, as "from: subject".
@@ -636,7 +681,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  prevJob = undefined; toolJob = ''; unread = []; granted = false; indexVersion = null
+  prevJob = undefined; toolJob = ''; unread = []; unmatchedWhy = ''; unmatchedWritten = false; granted = false; indexVersion = null
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -822,7 +867,7 @@ export const register: Register = on => {
         seenList = { list, paged: partial }
         // A new thread the mod could not place at start: the listing names its project's threads,
         // so the card holding one of them is its card.
-        if (!found && !removed && remoteId && initDone && !noBoard) void placeFrom($, list)
+        if (!found && remoteId && initDone && !noBoard) void placeFrom($, list)
       }
       return r
     }
@@ -884,18 +929,22 @@ export const register: Register = on => {
           if (coordinator.cardId) say($, `board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
           return
         }
-        if (!found && !removed) found = await indexLookup($)          // the model may have registered this chat
+        if (!found) found = await indexLookup($)                     // the model may have registered this chat
+        if (!found && remoteId) { const l = await projectThreads($); if (l) await placeFrom($, l) }
         else if (found && registeredHere) {                          // the model may have fixed the label
           const card = await getCard($, found.cardId)
           const f = card ? findIn([card]) : null
           if (f) { found = f; registeredHere = f.label === PLACEHOLDER }
         }
-        if (!found || seq !== turnSeq) return
+        if (seq !== turnSeq) return
+        if (!found) { await markUnmatched($); return }
         const d = reason === 'answer' ? await decide($, answer) : { status: 'idle', job: undefined as string | undefined }
         if (seq !== turnSeq) return
+        const fromModel = !!seenList                                 // the status write applies the model's listing
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
-        if (listTool && found) await syncThreads($)
+        if (found && !fromModel) await syncThreads($)
         if (found) await checkMail($, found.cardId)
+        await markUnmatched($)
       } catch (err) { say($, `board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out

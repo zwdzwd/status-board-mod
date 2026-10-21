@@ -29,11 +29,12 @@ export function makeEnv(opts) {
       ver[key] = exists ? (ver[key] || 1) + 1 : 1; writes.push({ c, id, data: structuredClone(a.data) })
       return { text: `Database ${a.action} committed. The document is now at version ${ver[key]}.` }
     }
+    if (a.action === 'delete') { if (!doc(c, id)) return { isError: true, text: 'No document' }; if (a.if_version !== (ver[key] || 1)) return { isError: true, text: 'version mismatch' }; delete db[c][id]; return { text: 'deleted' } }
     return { isError: true, text: 'bad action' }
   }
   const handlers = {}
   const on = (ev, a, b) => { const h = b || a; (handlers[ev] ||= []).push(h); return { catch: () => {} } }
-  const state = { id: opts.sessionId || 'aaaaaaaa-1111-2222-3333-444444444444', remote: opts.remote === undefined ? 'cse_01REMOTEaaaaaaaaaaaaaaaa' : opts.remote, latency: opts.latency, classify: opts.classify, tools: opts.tools || ['Bash', 'ArtifactData'], listing: opts.listing, wrap: opts.wrap }
+  const state = { id: opts.sessionId || 'aaaaaaaa-1111-2222-3333-444444444444', remote: opts.remote === undefined ? 'cse_01REMOTEaaaaaaaaaaaaaaaa' : opts.remote, latency: opts.latency, classify: opts.classify, tools: opts.tools || ['Bash', 'ArtifactData'], listing: opts.listing, wrap: opts.wrap, mcpListing: opts.mcpListing }
   const $ = {
     plugin: { name: 'status-board' },
     tool: {
@@ -55,6 +56,7 @@ export function makeEnv(opts) {
     model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] },
       complete: async (req) => { state.lastPrompt = req.prompt; return state.summary ? { isAnswered: true, text: state.summary } : { isAnswered: false, reason: 'api-error' } } },
     command: { register: async () => {} },
+    mcp: { call: async (server, tool) => { if (server !== 'hearthbot' || !state.mcpListing) throw new Error('no session is bound'); return { isError: false, content: [{ type: 'text', text: JSON.stringify(state.mcpListing) }] } } },
     process: { run: async () => { if (opts.ps === undefined) throw new Error('no process'); return { exitCode: 0, stdout: opts.ps, stderr: '' } } },
     // opts.files: path -> { text, at } for the skill files the mod looks up.
     fs: { read: async (f) => (opts.files || {})[f]?.text ?? '',
