@@ -252,6 +252,11 @@ console.log('N13. a job without a description shows its command, short secrets n
     const got = (E.entry('methscope').jobs || [])[0]?.text
     ok(got === want, `${cmd} -> ${got}`) } }
 
+console.log('N15. a Remote Control session finds its remote id from its process and gets the note')
+{ const E = await env({ db: card([{ label: 'HPC', session: 'cse_01RCabcdefghijklmnopqrst', url: 'u' }]), remote: '', ps: '/x/claude --print --session-id cse_01RCabcdefghijklmnopqrst --input-format stream-json\n' })
+  await E.fire('session.start', {}); await settle()
+  ok(/thread "HPC"/.test(await E.note(['print'])), 'found by the remote id from ps, note shown under print') }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()

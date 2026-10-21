@@ -54,6 +54,7 @@ export function makeEnv(opts) {
     model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] },
       complete: async (req) => { state.lastPrompt = req.prompt; return state.summary ? { isAnswered: true, text: state.summary } : { isAnswered: false, reason: 'api-error' } } },
     command: { register: async () => {} },
+    process: { run: async () => { if (opts.ps === undefined) throw new Error('no process'); return { exitCode: 0, stdout: opts.ps, stderr: '' } } },
     // opts.files: path -> { text, at } for the skill files the mod looks up.
     fs: { read: async (f) => (opts.files || {})[f]?.text ?? '',
       stat: async (f) => { const x = (opts.files || {})[f]; if (!x) throw new Error('missing'); return { kind: 'file', size: x.text.length, mtimeMs: x.at || 0, isLink: false } },

@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.10.0'
+const VERSION = '0.10.1'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -167,6 +167,16 @@ function trace($: Engine, text: string): void {
     try { old = await $.fs.read(logPath) } catch {}
     await $.fs.write(logPath, (old + line).slice(-20000))
   }).catch(() => {})
+}
+
+// The remote session id (cse_…). Cloud sessions carry it in CLAUDE_CODE_REMOTE_SESSION_ID; a Remote
+// Control session on a computer does not, but its process was started with --session-id cse_….
+async function findRemoteId($: Engine): Promise<string> {
+  try { const v = await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID'); if (v) return v } catch {}
+  try {
+    const r = await $.process.run(['sh', '-c', 'ps -o command= -p $PPID'], { timeoutMs: 5000 })
+    return /--session-id[= ](cse_[A-Za-z0-9]+)/.exec(r.stdout)?.[1] ?? ''
+  } catch { return '' }
 }
 
 // ---- Board access ----
@@ -617,7 +627,7 @@ async function refreshSession($: Engine): Promise<void> {
   if (!id || id === sessionId) { pendingClear = false; return }
   const oldIds = myIds()
   sessionId = id
-  try { remoteId = (await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID')) || '' } catch {}
+  remoteId = await findRemoteId($)
   const wasClear = pendingClear
   pendingClear = false
   if (wasClear && found) {
@@ -738,7 +748,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     try { await $.command.register({ name: 'board-status', description: 'Show and update this chat\'s Status Board card, here in this chat (never start a thread for it)' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
-    try { remoteId = (await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID')) || '' } catch {}
+    remoteId = await findRemoteId($)
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
     trace($, `session.start: remote ${remoteId || 'none'}, board ${BOARD} (${boardFrom})`)
     if (sessionId) startInit($)
@@ -762,8 +772,8 @@ export const register: Register = on => {
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     const traits = e.traits || []
-    // A one-shot run (-p) gets no note; a Remote Control thread also runs as print, but is on a card.
-    if (!sessionId || traits.includes('teammate') || (traits.includes('print') && !found)) return r
+    // A one-shot run (-p) gets no note; a Remote Control thread also runs as print, but has a remote id.
+    if (!sessionId || traits.includes('teammate') || (traits.includes('print') && !found && !remoteId)) return r
     const text = boardNote(!traits.includes('analysis'))
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })
