@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.16'
+const VERSION = '0.9.17'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -177,7 +177,8 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   }
   // Auto mode may refuse a call no request asked for, asking for it to be issued once more: do that.
   const refusal = String(r.deny ?? (r.isError ? r.text : '') ?? '')
-  if (/gave no verdict/i.test(refusal)) { trace($, 'auto mode gave no verdict, retrying once: ' + refusal); r = await boardCall($, args, ms) }
+  if (/gave no verdict/i.test(refusal)) {
+    try { trace($, 'tool.check query: ' + JSON.stringify(await $.tool.check({ tool: 'ArtifactData', input: { url: BOARD, ...args } } as any))) } catch (err) { trace($, 'tool.check query failed: ' + msg(err)) } trace($, 'auto mode gave no verdict, retrying once: ' + refusal); r = await boardCall($, args, ms) }
   if (r.missing) { noBoard = true; trace($, 'ArtifactData missing: ' + String(r.text ?? '').slice(0, 160)); throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
@@ -708,6 +709,7 @@ export const register: Register = on => {
   on('tool.check', ($, e, next) => {
     const base = (n: unknown) => String(n || '').split('@')[0]?.split('/').pop() ?? ''
     const o = base(next.origin && next.origin.plugin)
+    if (e.tool === 'ArtifactData') trace($, `tool.check ArtifactData: origin ${JSON.stringify(next.origin)}, plugin ${$.plugin.name}, own ${!!o && (o === base($.plugin.name) || o === PLUGIN)}`)
     if (!o || (o !== base($.plugin.name) && o !== PLUGIN)) return next(e)
     const input = (e.input && typeof e.input === 'object' ? e.input : {}) as Record<string, unknown>
     const ok = (e.tool === 'ArtifactData' && input.url === BOARD)
