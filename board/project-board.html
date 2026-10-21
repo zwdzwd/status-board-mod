@@ -3,7 +3,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <style>
-/* Layout: foldable sections by kind of work (Papers, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come from the status each thread writes to the card; the card's own status follows its threads. */
+/* Layout: foldable sections by kind of work (Analysis, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come from the status each thread writes to the card; the card's own status follows its threads. */
 :root{
   --bg:#f3f5f6; --panel:#ffffff; --fg:#14202a; --muted:#5b6b78; --line:#d9e0e5; --accent:#0f6e7a; --accent-soft:#e1f0f1;
   --think:#2563a8; --think-soft:#e3ecf8; --ok:#2f8a4e; --ok-soft:#e3f3e8; --warn:#b7791f; --warn-soft:#fbf0dc; --bad:#c2410c; --bad-soft:#fde8dd; --idle:#7b8794; --idle-soft:#eceff2;
@@ -121,9 +121,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     waiting:{label:"Waiting on you",rank:0}, thinking:{label:"Thinking",rank:1}, working:{label:"Working",rank:2},
     idle:{label:"Idle",rank:3}
   };
-  // Sections, in page order. A card's "category" picks its section; cards without one go to Papers.
+  // Sections, in page order. A card's "category" picks its section; cards without one go to Analysis (key "paper").
   // Grants, talks and personal work share one section, Misc.
-  const SECTIONS = [{key:"paper", label:"Papers"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
+  const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
   const catKey = c => { const k = String(c || "").toLowerCase().trim(); const a = CAT_ALIAS[k] || k; return SECTIONS.some(s => s.key === a) ? a : "paper"; };
