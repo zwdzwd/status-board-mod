@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.11'
+const VERSION = '0.9.12'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -130,6 +130,31 @@ async function findBoard($: Engine): Promise<void> {
   if (best) { BOARD = best.link; boardFrom = 'from ' + best.file }
 }
 
+// ---- Trace ----
+// Everything the mod shows on its status line also goes to ~/.claude/status-board.log (the last
+// 20 kB), since a Remote Control or project session shows no status line to anyone.
+let logPath: string | null = null
+let logging: Promise<void> = Promise.resolve()
+function say($: Engine, text: string): void {
+  try { $.ui.status(text) } catch {}
+  trace($, text)
+}
+function trace($: Engine, text: string): void {
+  const line = `${now()} ${sessionId.slice(0, 8) || '-'} v${VERSION} ${text}\n`
+  logging = logging.then(async () => {
+    if (logPath === null) {
+      let dir = ''
+      try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
+      if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
+      logPath = dir ? dir + '/status-board.log' : ''
+    }
+    if (!logPath) return
+    let old = ''
+    try { old = await $.fs.read(logPath) } catch {}
+    await $.fs.write(logPath, (old + line).slice(-20000))
+  }).catch(() => {})
+}
+
 // ---- Board access ----
 // $.tool.call rejects when no tool has the name (or the call is aborted); a tool's own failure
 // resolves with isError. Only the first means the session lacks ArtifactData.
@@ -147,10 +172,10 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
     try { await limit($, $.tool.call({ tool: 'ToolSearch', query: 'select:ArtifactData', max_results: 1 } as any), 10000, 'tool search') } catch {}
     r = await boardCall($, args, ms)
   }
-  if (r.missing) { noBoard = true; throw new Error('no ArtifactData tool in this session') }
+  if (r.missing) { noBoard = true; trace($, 'ArtifactData missing: ' + String(r.text ?? '').slice(0, 160)); throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
-    if (!/^No document /i.test(text)) lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`
+    if (!/^No document /i.test(text)) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`; trace($, 'board error: ' + lastError) }
     throw new Error(text)
   }
   lastError = ''
@@ -160,7 +185,7 @@ const isConflict = (err: unknown) => /version/i.test(msg(err))
 
 // Board writes go through one queue, so they land in the order they were asked for.
 function enqueue($: Engine, what: string, fn: () => Promise<void>): Promise<void> {
-  const run = busy.then(fn).catch((err: unknown) => { $.ui.status(`board: ${what} failed (${msg(err).slice(0, 60)})`) })
+  const run = busy.then(fn).catch((err: unknown) => { say($, `board: ${what} failed (${msg(err).slice(0, 60)})`) })
   busy = run
   return run
 }
@@ -287,7 +312,7 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
       if (!threadsOf(card).some(t => isMine(t, ids))) {
         // The entry is gone (the thread was resolved, or removed by hand): stop writing.
         if (found === f) { found = null; removed = true; registeredHere = false }
-        $.ui.status('board: this chat is no longer on its card')
+        say($, 'board: this chat is no longer on its card')
         return
       }
       const at = now()
@@ -310,11 +335,11 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
         if (job !== undefined && !job.startsWith(TOOL)) { prevJob = undefined; toolJob = '' }
         if (status) lastWrite = status
-        $.ui.status(`board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}`)
+        say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}`)
         return
       } catch (err) { if (!isConflict(err)) throw err }   // someone else wrote the card: read again, once
     }
-    $.ui.status('board: status not written (the card kept changing)')
+    say($, 'board: status not written (the card kept changing)')
   })
 }
 
@@ -335,7 +360,7 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
       try { await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } }); return }
       catch (err) { if (!isConflict(err)) throw err }
     }
-    $.ui.status('board: entry not moved after /clear (the card kept changing)')
+    say($, 'board: entry not moved after /clear (the card kept changing)')
   })
 }
 
@@ -362,6 +387,7 @@ async function listToolName($: Engine): Promise<string> {
     }
   }
   listTool = n
+  trace($, `tools: listing ${n || 'none'}, project conversation ${projectTools}, seen [${toolsSeen.join(' ')}] of ${names.length}`)
   return n
 }
 
@@ -479,7 +505,7 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
 function syncThreads($: Engine): Promise<void> {
   const f = found
   if (!f) return Promise.resolve()
-  return enqueue($, 'thread list sync', async () => { lastSync = await syncThreadList($, f.cardId); $.ui.status(`board: ${f.name} threads: ${lastSync}`) })
+  return enqueue($, 'thread list sync', async () => { lastSync = await syncThreadList($, f.cardId); say($, `board: ${f.name} threads: ${lastSync}`) })
 }
 
 // What the mod decided and why, in diagnostics/<session id> on the board, since the user cannot see
@@ -503,9 +529,9 @@ async function init($: Engine): Promise<void> {
   try {
     await detectCoordinator($)
     if (coordinator) {
-      if (noBoard) { $.ui.status('board: project conversation without ArtifactData; nothing to do'); return }
-      if (!coordinator.cardId) { report = 'the Status Board mod could not find this project\'s card'; $.ui.status('board: project conversation, card not matched'); return }
-      $.ui.status(`board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
+      if (noBoard) { say($, 'board: project conversation without ArtifactData; nothing to do'); return }
+      if (!coordinator.cardId) { report = 'the Status Board mod could not find this project\'s card'; say($, 'board: project conversation, card not matched'); return }
+      say($, `board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
       return
     }
     let viaIndex = true
@@ -521,19 +547,19 @@ async function init($: Engine): Promise<void> {
       registeredHere = found.label === PLACEHOLDER
       if (!viaIndex) void indexWrite($, found)
       void setStatus($, turnActive ? 'thinking' : 'idle', undefined, false)
-      $.ui.status(`board: ${found.name} / ${found.label}`)
+      say($, `board: ${found.name} / ${found.label}`)
       if (listTool) void syncThreads($)
     } else if (noBoard) {
       report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
-      $.ui.status('board: no ArtifactData tool in this session')
+      say($, 'board: no ArtifactData tool in this session')
     } else {
       if (remoteId) report = `the Status Board mod could not match this chat to a project card (${lastError ? 'board call failed: ' + lastError : skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card\'s repo or name matches this repository or folder'})`
-      $.ui.status('board: no card matched this chat')
+      say($, 'board: no card matched this chat')
     }
   } catch (err) {
     if (noBoard) report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
     else { initFailed++; if (initFailed >= 3) report = `the Status Board mod could not read the board (${msg(err).slice(0, 120)})` }
-    $.ui.status(`board: could not read the board (${msg(err).slice(0, 60)})`)
+    say($, `board: could not read the board (${msg(err).slice(0, 60)})`)
   } finally {
     initDone = true
     void diagnose($, 'start')
@@ -674,6 +700,7 @@ export const register: Register = on => {
     try { sessionId = await $.session.id() } catch {}
     try { remoteId = (await $.env.get('CLAUDE_CODE_REMOTE_SESSION_ID')) || '' } catch {}
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
+    trace($, `session.start: remote ${remoteId || 'none'}, board ${BOARD} (${boardFrom})`)
     if (sessionId) startInit($)
     else initDone = true
     return next(e)
@@ -732,6 +759,7 @@ export const register: Register = on => {
       turnActive = true
       toolDepth = 0
       await refreshSession($)
+      trace($, `turn.start: initDone ${initDone}, found ${found ? found.cardId + '/' + found.label : 'none'}, coordinator ${coordinator ? coordinator.cardId || '?' : 'no'}, noBoard ${noBoard}`)
       if (initDone && initFailed > 0 && initFailed < 3 && !found && !coordinator) startInit($)   // the board failed at start: try again
       if (found && initDone) void setStatus($, 'thinking')
     }
@@ -756,7 +784,7 @@ export const register: Register = on => {
         await initPromise                     // a first turn can end before the lookup has
         if (noBoard || seq !== turnSeq) return
         if (coordinator) {
-          if (coordinator.cardId) $.ui.status(`board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
+          if (coordinator.cardId) say($, `board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
           return
         }
         if (!found && !removed) found = await indexLookup($)          // the model may have registered this chat
@@ -771,7 +799,7 @@ export const register: Register = on => {
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
         if (listTool && found) await syncThreads($)
         await diagnose($, 'turn')
-      } catch (err) { $.ui.status(`board: end of turn failed (${msg(err).slice(0, 60)})`) }
+      } catch (err) { say($, `board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out
   })
