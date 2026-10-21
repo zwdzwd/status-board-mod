@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.14'
+const VERSION = '0.9.15'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -175,6 +175,8 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
     try { await limit($, $.tool.call({ tool: 'ToolSearch', query: 'select:ArtifactData', max_results: 1 } as any), 10000, 'tool search') } catch {}
     r = await boardCall($, args, ms)
   }
+  // Auto mode may refuse a call no request asked for, asking for it to be issued once more: do that.
+  if (r.isError && /gave no verdict/i.test(String(r.text ?? ''))) { trace($, 'auto mode gave no verdict, retrying once: ' + String(r.text)); r = await boardCall($, args, ms) }
   if (r.missing) { noBoard = true; trace($, 'ArtifactData missing: ' + String(r.text ?? '').slice(0, 160)); throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
