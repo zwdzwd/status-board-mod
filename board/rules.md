@@ -128,4 +128,8 @@ for a project may write one, in the cloud or on my computers.
   what it asks and wait for my go-ahead before acting on it.
 - Sending: when I ask a project to tell another one something, write
   the note here and tell me its doc_id.
+- The board shows a note and its replies (linked by re) as one
+  conversation. Once every note in it is read, I can clear it there,
+  which sets archived_at on its notes; they stay in the data. Leave
+  archived_at alone.
 
