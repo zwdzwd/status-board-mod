@@ -103,6 +103,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .skillbox pre{margin:0;font-family:var(--f-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;user-select:all}
 .unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
 .unmatched b{font-weight:600}
+.mail{font-size:10.5px;font-weight:600;color:var(--bad);background:var(--bad-soft);border-radius:999px;padding:0 6px;flex-shrink:0}
 [hidden]{display:none!important}
 </style>
 
@@ -160,6 +161,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     ].join("\n");
   }   // one version for board, mod and rules; bump all three together
   let projects = [];
+  let messages = [];   // notes between projects (collection "messages")
+  const unreadFor = id => messages.filter(m => m.to === id && !m.read_at);
   // Threads the mod could not place on any card (collection "unmatched"), shown so nothing is guessed.
   function renderUnmatched(rows){
     const box = $("unmatched"), recent = rows.filter(r => r.at && Date.now() - Date.parse(r.at) < 24*3600000);
@@ -216,7 +219,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
   function card(p){
     const c = el("article",{class:"card","data-id":p.id});
-    const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
+    const inbox = unreadFor(p.id);
+    const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), inbox.length ? el("span",{class:"mail",title:inbox.length + " unread note" + (inbox.length === 1 ? "" : "s") + " for this project",text:"✉ " + inbox.length}) : null, el("span",{class:"meta",text:ago(p.updated)}));
     if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
     c.append(top);
     // Body: summary / next / blockers, then the thread buttons along the bottom (at most 4, then "… +N").
@@ -256,6 +260,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     // Every running background job, by thread.
     const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
     if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
+    // Notes between projects: unread ones to this project, and the latest few either way.
+    const notes = messages.filter(m => m.to === p.id || m.from === p.id).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 5);
+    if (notes.length){ const w = el("div",null, el("b",{text:"Notes (" + unreadFor(p.id).length + " unread)"}));
+      notes.forEach(m => w.append(el("p",{class:m.to === p.id && !m.read_at ? "bad" : "muted",text:(m.to === p.id ? "from " + m.from : "to " + m.to) + ", " + ago(m.at) + ": " + (m.subject || "") + (m.to === p.id && !m.read_at ? " (unread)" : "")})));
+      t.append(w); }
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
   }
   function placeTip(card){
@@ -324,6 +333,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   (async function start(){
     const db = await claude.use("db");
     if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
+    db.collection("messages").onSnapshot(snap => { messages = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); if (projects.length) render(); }, () => {});
     db.collection("unmatched").onSnapshot(snap => renderUnmatched(snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(snap => {
       projects = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()));
