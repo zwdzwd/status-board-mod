@@ -8,7 +8,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.12.1'
+const VERSION = '0.12.2'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -347,9 +347,14 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (ended === false) delete n.ended
         return n
       })
-      if (seen && !seen.paged && !belongsTo(card, seen.list)) {
-        // This chat sits on another project's card (an old repository guess): leave that card's
-        // list alone, take this chat's entry off it, and let the listing place it again.
+      // A card none of whose other entries is in this project's listing is either another project's
+      // card (an old repository guess put this chat there) or this project's card carrying strays.
+      // It is another project's only when some other card holds this project's threads.
+      const home = seen && !seen.paged && !belongsTo(card, seen.list)
+        ? (await cards($)).find(c => c.id !== card.id && threadsOf(c).some(t => t && !isMine(t, ids) && seen.list.some(p => matchesThread(p, t))))
+        : undefined
+      if (seen && home) {
+        // Leave that card's list alone, take this chat's entry off it, and let the listing place it.
         try {
           await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th.filter(t => !isMine(t, ids)) } })
         } catch (err) { if (isConflict(err)) continue; throw err }
@@ -516,7 +521,9 @@ async function detectCoordinator($: Engine): Promise<void> {
 // only a first page, every entry it does not know.
 function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean, ids: string[]): Thread[] {
   const used = new Set<ProjThread>()
-  const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
+  // New links take the project link from an entry of this project (one the listing knows), never
+  // from a stray of another project.
+  const base = (before.filter(t => t && list.some(p => matchesThread(p, t))).map(t => String(t.url || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
   const kept: Thread[] = []
   for (const t of before) {
     if (!t) continue

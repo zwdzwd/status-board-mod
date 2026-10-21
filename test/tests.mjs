@@ -361,6 +361,18 @@ console.log('N23. an entry that carries only this thread\'s link is claimed, not
   const th = E.db.projects.adapt.threads
   ok(th.length === 2 && th[0].label === 'Analysis' && th[0].session === RID && th[0].transcript && th[0].status === 'idle', 'Analysis claimed and written: ' + JSON.stringify(th.map(t => [t.label, t.session, t.status]))) }
 
+console.log('N24. a project\'s own card carrying another project\'s strays keeps its thread and drops the strays')
+{ const RID = 'cse_01E6R9ARPL1E7prvWztiVnPY', B = 'https://claude.ai/code/project/chan_B?thread='
+  const E = await env({ db: { projects: {
+      brain: { name: 'BrainRegion', threads: [{ label: 'Analysis', session: RID, url: B + 'cmsg_BA' }, { label: 'Writing', session: 'cse_AW', url: B + 'cmsg_AW' }] },
+      adapt: { name: 'AdaptSampling', threads: [{ label: 'Writing', session: 'cse_AW', url: 'https://claude.ai/code/project/chan_A?thread=cmsg_AW' }] } } }, remote: RID })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_BA', title: 'Analysis', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(E.db.projects.brain.threads.map(t => t.label).join(',') === 'Analysis', 'stays on its card, stray dropped: ' + E.db.projects.brain.threads.map(t => t.label).join(','))
+  ok(!(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'not recorded as unmatched') }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()
