@@ -257,6 +257,17 @@ console.log('N15. a Remote Control session finds its remote id from its process 
   await E.fire('session.start', {}); await settle()
   ok(/thread "HPC"/.test(await E.note(['print'])), 'found by the remote id from ps, note shown under print') }
 
+console.log('N16. a new Remote Control thread not matched at start registers from the model\'s listing, then its label is set by the sync')
+{ const RID = 'cse_01RCnewthreadaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const E = await env({ db: { projects: { mine: { name: 'Mine', threads: [{ label: 'Writing', session: 'cse_A', url: U + 'cmsg_A' }] } } }, remote: '', ps: '--session-id ' + RID, repo: null, cwd: '/hpc/work' })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  ok(!E.db.projects.mine.threads.some(t => t.session === RID), 'not placed at start')
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_NEW', title: 'HPC run', status: 'active' }, { session_id: 'cse_A', thread_id: 'cmsg_A', title: 'Writing', status: 'active' }] }) }); await settle()
+  await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
+  const t = E.db.projects.mine.threads.find(t => t.session === RID)
+  ok(t && t.label === 'HPC run' && t.url === U + 'cmsg_NEW' && t.status === 'idle', 'registered, named and linked: ' + JSON.stringify(t)) }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()

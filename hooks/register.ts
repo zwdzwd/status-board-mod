@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.10.2'
+const VERSION = '0.10.3'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -292,8 +292,8 @@ async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
 // The card a new thread registers on. Where the session can list its project's threads, the card
 // holding one of them is the project's. A card matched only by repository or name is then refused
 // when it lists threads the listing does not know: another project working in the same repository.
-async function threadCard($: Engine, docs: Card[]): Promise<Card | null> {
-  const list = listTool ? await projectThreads($) : null
+async function threadCard($: Engine, docs: Card[], given?: ProjThread[]): Promise<Card | null> {
+  const list = given ?? (listTool ? await projectThreads($) : null)
   if (list) {
     const own = docs.find(c => threadsOf(c).some(t => t && list.some(p => matchesThread(p, t))))
     if (own) return own
@@ -797,7 +797,19 @@ export const register: Register = on => {
     if (e.agentId === undefined && LIST.test(name)) {
       const r = await next(e)
       const list = readListing(r as unknown as ToolResult)
-      if (list) { seenList = { list, paged: partial }; trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`) }
+      if (list) {
+        seenList = { list, paged: partial }
+        trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`)
+        // A new thread the mod could not place at start: the listing names its project's threads,
+        // so the card holding one of them is its card.
+        if (!found && !removed && remoteId && initDone && !noBoard) void enqueue($, 'registration', async () => {
+          if (found) return
+          const c = await threadCard($, await cards($), list)
+          if (!c) { trace($, 'no card holds this project\'s threads'); return }
+          found = await registerThread($, c)
+          if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the model's listing`) }
+        })
+      }
       return r
     }
     if (e.agentId !== undefined || !found || !/bash|shell|device|computer|remote|browser|ssh|slurm/i.test(name)) return next(e)
