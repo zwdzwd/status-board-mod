@@ -104,6 +104,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
 .unmatched b{font-weight:600}
 .note{display:flex;flex-direction:column;gap:1px;margin-top:4px}
+.chain{border-left:2px solid var(--line);padding-left:6px;margin-top:4px}
+.note.reply,.meta.reply{margin-left:10px}
+.note.settled .proj{opacity:.7} .note.settled p{font-size:12px}
+.done{margin-top:4px}
 .note .route{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
 .note .proj{font-size:11px;font-weight:600;border:1px solid var(--line);border-radius:4px;padding:0 5px;background:var(--idle-soft);color:var(--fg)}
 .note .arrow{color:var(--muted);font-size:12px}
@@ -168,7 +172,25 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   }   // one version for board, mod and rules; bump all three together
   let projects = [];
   let messages = [];   // notes between projects (collection "messages")
-  const unreadFor = id => messages.filter(m => m.to === id && !m.read_at);
+  let dbRef = null;
+  const unreadFor = id => messages.filter(m => m.to === id && !m.read_at && !m.archived_at);
+  // The conversations a project is part of, newest first; cleared ones (archived_at) are left out.
+  function chainsFor(id){
+    const byId = {}; messages.forEach(m => byId[m.id] = m);
+    const rootOf = m => { const seen = new Set(); while (m.re && byId[m.re] && !seen.has(m.re)){ seen.add(m.re); m = byId[m.re]; } return m.id; };
+    const groups = {};
+    messages.forEach(m => { const r = rootOf(m); (groups[r] = groups[r] || []).push(m); });
+    return Object.values(groups)
+      .filter(ns => ns.some(m => m.to === id || m.from === id) && !ns.every(m => m.archived_at))
+      .map(ns => { ns.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
+        return { notes: ns, settled: ns.every(m => m.read_at), last: ns[ns.length - 1].at }; })
+      .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
+  }
+  async function clearChain(c){
+    if (!dbRef) return;
+    const at = new Date().toISOString();
+    for (const m of c.notes) { try { await dbRef.doc("messages/" + m.id).update({archived_at: at}); } catch(e){} }
+  }
   // Threads the mod could not place on any card (collection "unmatched"), shown so nothing is guessed.
   function renderUnmatched(rows){
     const box = $("unmatched"), recent = rows.filter(r => r.at && Date.now() - Date.parse(r.at) < 24*3600000);
@@ -266,15 +288,34 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     // Every running background job, by thread.
     const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
     if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
-    // Notes between projects: unread ones to this project, and the latest few either way.
-    const notes = messages.filter(m => m.to === p.id || m.from === p.id).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 5);
-    if (notes.length){ const w = el("div",null, el("b",{text:"Notes (" + unreadFor(p.id).length + " unread)"}));
+    // Notes between projects, as conversations: a note and its replies (linked by "re") form one chain.
+    // A chain is settled when every note in it is read; settled chains fold to one line and can be
+    // cleared (archived_at), so the card stays short. Open chains come first.
+    const chains = chainsFor(p.id);
+    if (chains.length){
+      const open = chains.filter(c => !c.settled), done = chains.filter(c => c.settled);
+      const w = el("div",null, el("b",{text:"Notes" + (open.length ? " (" + open.length + " open)" : "")}));
       const pname = id => { const q = projects.find(x => x.id === id); return q ? (q.name || q.id) : id; };
-      notes.forEach(m => { const fresh = m.to === p.id && !m.read_at;
-        w.append(el("div",{class:"note" + (fresh ? " unread" : "")},
-          el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:ago(m.at) + (fresh ? " · unread" : "")})),
-          el("p",{text:m.subject || ""}))); });
-      t.append(w); }
+      const route = m => el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:ago(m.at)}));
+      // An open conversation shows its first note and its latest two; the ones between fold to a count.
+      open.forEach(c => { const box = el("div",{class:"chain"}), n = c.notes.length;
+        c.notes.forEach((m, k) => {
+          if (n > 3 && k > 0 && k < n - 2){ if (k === 1) box.append(el("p",{class:"meta reply",text:"… " + (n - 3) + " more"})); return; }
+          const fresh = m.to === p.id && !m.read_at;
+          box.append(el("div",{class:"note" + (k ? " reply" : "") + (fresh ? " unread" : "")}, route(m), el("p",{text:(m.subject || "") + (fresh ? " (unread)" : "")}))); });
+        w.append(box); });
+      if (done.length){
+        const list = el("div",{class:"done"});
+        done.slice(0, 3).forEach(c => { const m = c.notes[0];
+          const clear = el("button",{class:"linkbtn",type:"button",title:"Hide this conversation from the board (the notes stay in the data)",text:"clear"});
+          clear.addEventListener("click", ev => { ev.stopPropagation(); clearChain(c); });
+          list.append(el("div",{class:"note settled"}, el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:c.notes.length + " note" + (c.notes.length === 1 ? "" : "s") + ", settled " + ago(c.last)}), clear), el("p",{text:m.subject || ""})));
+        });
+        if (done.length > 3) list.append(el("p",{class:"meta",text:"+ " + (done.length - 3) + " older settled"}));
+        w.append(list);
+      }
+      t.append(w);
+    }
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
   }
   function placeTip(card){
@@ -341,7 +382,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   };
 
   (async function start(){
-    const db = await claude.use("db");
+    const db = await claude.use("db"); dbRef = db;
     if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
     db.collection("messages").onSnapshot(snap => { messages = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); if (projects.length) render(); }, () => {});
     db.collection("unmatched").onSnapshot(snap => renderUnmatched(snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
