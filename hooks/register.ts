@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.10.1'
+const VERSION = '0.10.2'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -524,6 +524,7 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
 function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Thread[] {
   {
     const used = new Set<ProjThread>()
+    const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
     const kept: Thread[] = []
     for (const t of before) {
       if (!t) continue
@@ -532,9 +533,9 @@ function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Th
       if (fresh || (!m && paged)) { kept.push(t); continue }
       if (!m || !m.open || used.has(m)) continue
       used.add(m)
-      kept.push(m.name !== t.label ? { ...t, label: m.name } : t)
+      const tid = !t.url && base ? m.ids.find(i => /^cmsg_/.test(i)) : ''
+      kept.push(m.name !== t.label || tid ? { ...t, label: m.name, ...(tid ? { url: `${base}?thread=${tid}` } : {}) } : t)
     }
-    const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
     for (const p of list) {
       if (!p.open || used.has(p)) continue
       const tid = p.ids.find(i => /^cmsg_/.test(i)) || ''
