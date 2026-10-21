@@ -1,7 +1,7 @@
 # Status Board
 
 One board for every Claude project, kept current by the projects themselves.
-Three parts, one version number (`VERSION`; the same string is in
+Five parts, one version number (`VERSION`; the same string is in
 `.claude-plugin/plugin.json`, `hooks/register.ts`, `board/project-board.html`,
 `board/rules.md`, and in `meta/instruction.version` on the board):
 

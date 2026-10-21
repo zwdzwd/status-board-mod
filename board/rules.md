@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.12.0
+# Status Board rules (meta/instruction) — v0.12.3
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -40,7 +40,8 @@ Its "Status Board mod" note is in your system prompt when it runs. It
 does the per-turn bookkeeping by itself:
   - it finds this session's entry through the index record
     sessions/<session UUID>; failing that, by the entry carrying the
-    UUID; failing that, it registers a new entry (label "New thread",
+    UUID, the session id, or the thread id in its url; failing that,
+    it registers a new entry (label "New thread",
     transcript = the UUID) on the card that holds the project's other
     threads, as the project's thread list shows them. A repository or
     folder match alone never places a thread, since several projects
@@ -62,10 +63,11 @@ does the per-turn bookkeeping by itself:
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
     the start of each fresh session;
-  - it stamps the entry ended when the session ends. The board shows a
-    thread while it has been active in the last 8 hours and its session
-    has not ended since; otherwise the thread is quiet (one click away
-    on the card) and comes back when used again.
+  - it stamps the entry ended when the session ends. The board gives a
+    thread a button while it has been active in the last 8 hours and
+    its session has not ended since; otherwise the thread is quiet
+    (counted on the card, listed when the card is opened) and comes
+    back when used again.
 Where the status-board plugin is not installed, do that bookkeeping yourself: write status
 "thinking" before other work and the end state after the reply is
 settled, each with at = ISO now; set jobs to the background work
@@ -74,8 +76,8 @@ it finishes.
 
 ## The card
 - Set the card's repo field once to this repository's owner/name (from
-  git remote). The mod uses it only to place the first thread of a
-  card that has no threads yet.
+  git remote). The mod uses it only as a tie-break, for a card that
+  holds no other project's threads.
 - Update the rest of the card at the end of a session where something
   real changed (result, decision, new blocker, finished step), or when
   I say "update the board". Skip it when nothing changed.
@@ -89,7 +91,8 @@ it finishes.
     card shows two short lines; longer text is cut off)
   - next: the single next step, at most 12 words, or "" if there is none
   - blocker: what it is waiting on, at most 12 words, or "" if none
-  - threads: [{label, url, session, transcript, status, at, jobs}], one
+  - threads: [{label, url, session, transcript, status, at, jobs,
+    waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or

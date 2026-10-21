@@ -8,7 +8,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.12.2'
+const VERSION = '0.12.3'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -34,6 +34,7 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 // ---- State of this session ----
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
+let priorIds: string[] = []              // this chat's ids before a /clear, until its entry is moved
 let threadId = ''                        // this thread's cmsg_ id, once a listing has named it
 let found: Found | null = null           // this chat's card and entry
 let removed = false                      // the entry was taken off the card (the thread was resolved)
@@ -328,6 +329,11 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
       const card = await getCard($, f.cardId)
       if (!card) return
       if (!threadsOf(card).some(t => isMine(t, ids))) {
+        if (priorIds.length && threadsOf(card).some(t => isMine(t, priorIds))) {
+          // The entry still carries the ids from before a /clear: move it, then write.
+          void moveEntry($, priorIds, transcript); void setStatus($, status, ended, waiting)
+          return
+        }
         // The entry is gone (the thread was resolved, or removed by hand): stop writing.
         if (found === f) { found = null; removed = true; registeredHere = false }
         say($, 'board: this chat is no longer on its card')
@@ -384,14 +390,14 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
   return enqueue($, 'entry move', async () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       const card = await getCard($, f.cardId)
-      if (!card || !threadsOf(card).some(t => isMine(t, fromIds))) return
+      if (!card || !threadsOf(card).some(t => isMine(t, fromIds))) { priorIds = []; return }
       const th = threadsOf(card).map(t => {
         if (!isMine(t, fromIds)) return t
         const n: Thread = { ...t, transcript: to }
         delete n.ended
         return n
       })
-      try { await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } }); return }
+      try { await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } }); priorIds = []; return }
       catch (err) { if (!isConflict(err)) throw err }
     }
     say($, 'board: entry not moved after /clear (the card kept changing)')
@@ -461,8 +467,9 @@ function threadRecords(v: unknown, depth = 0): ProjThread[] | null {
     return null
   }
   if (Array.isArray(v)) {
-    const recs = v.map(threadRecord)
-    if (v.length && recs.every(Boolean)) return recs as ProjThread[]
+    // An array of thread records, allowing a few rows the parser cannot read (an empty title).
+    const recs = v.map(threadRecord).filter((x): x is ProjThread => !!x)
+    if (recs.length && recs.length * 2 >= v.length) return recs
     for (const x of v) { const r = threadRecords(x, depth + 1); if (r) return r }
     return null
   }
@@ -475,18 +482,22 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   let r: ToolResult
   if (probed) { r = probed; probed = null }
   else { try { r = await callListing($, name) } catch { return null } }
-  return readListing(r)
+  const l = readListing(r)
+  if (l) partial = l.paged
+  return l ? l.list : null
 }
 // A listing's thread records, from the mod's own call or the model's; partial is set when it has more pages.
-function readListing(r: ToolResult): ProjThread[] | null {
+type Listing = { list: ProjThread[]; paged: boolean }
+function readListing(r: ToolResult): Listing | null {
   if (!r || r.deny !== undefined || r.isError) return null
-  partial = /"?next_cursor"?\s*:\s*"[^"]/.test(String(r.text ?? '') + JSON.stringify(r.result ?? null))
+  const paged = /"?next_cursor"?\s*:\s*"[^"]/.test(String(r.text ?? '') + JSON.stringify(r.result ?? null))
   const list = threadRecords(r.result) || threadRecords(r.text)
+  if (!list) return null
   // The listing names this chat's thread: its cmsg_ id identifies an entry that has only a link.
   const me = list && remoteId ? list.find(p => p.ids.some(i => same(i, remoteId))) : null
   const tid = me ? me.ids.find(i => /^cmsg_/.test(i)) : ''
   if (tid) threadId = tid
-  return list
+  return { list, paged }
 }
 
 const threadIdOf = (t: Thread) => /[?&]thread=([A-Za-z0-9_]+)/.exec(String(t.url || ''))?.[1] ?? ''
@@ -531,7 +542,13 @@ function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean, ids
     const own = isMine(t, ids)
     const fresh = !m && !!t.at && Date.now() - Date.parse(t.at) < 15 * 60000 && (t.label === PLACEHOLDER || !t.url)
     if (!m && (own || fresh || paged)) { kept.push(t); continue }
-    if (!m || used.has(m) || (!m.open && !own)) continue
+    if (!m || (!m.open && !own)) continue
+    if (used.has(m)) {
+      // Two entries for one thread (one by session, one by link): merge this one into the kept one.
+      const k = kept.findIndex(x => matchesThread(m, x))
+      if (k >= 0) kept[k] = { ...t, ...kept[k], transcript: kept[k].transcript || t.transcript, session: kept[k].session || t.session }
+      continue
+    }
     used.add(m)
     const tid = !t.url && base ? m.ids.find(i => /^cmsg_/.test(i)) : ''
     kept.push(m.name !== t.label || tid ? { ...t, label: m.name, ...(tid ? { url: `${base}?thread=${tid}` } : {}) } : t)
@@ -564,21 +581,24 @@ const placeFrom = ($: Engine, list: ProjThread[]) => enqueue($, 'registration', 
 // guessed card; the record goes once the thread is placed.
 let unmatchedWhy = ''
 let unmatchedWritten = false
+let unmatchedChecked = false             // the record for this id was looked for once after placement
+async function dropUnmatched($: Engine, id: string): Promise<void> {
+  try { const d = await getDoc($, 'unmatched', id); if (d) await call($, { action: 'delete', collection: 'unmatched', doc_id: id, if_version: d.version }) } catch {}
+}
 const markUnmatched = ($: Engine) => enqueue($, 'unmatched record', () => unmatched($))
 async function unmatched($: Engine): Promise<void> {
   if (noBoard || !sessionId || coordinator) return
   try {
     if (found || removed) {
-      if (!unmatchedWritten) return
-      const d = await getDoc($, 'unmatched', sessionId)
-      if (d) await call($, { action: 'delete', collection: 'unmatched', doc_id: sessionId, if_version: d.version })
-      unmatchedWritten = false
+      if (unmatchedChecked && !unmatchedWritten) return
+      await dropUnmatched($, sessionId)
+      unmatchedWritten = false; unmatchedChecked = true
       return
     }
     if (!remoteId) return
     let folder = ''
     try { folder = await $.session.cwd() } catch {}
-    const why = listTool ? (unmatchedWhy || 'no card holds this project\'s threads') : 'the thread listing is not reachable from the mod here'
+    const why = unmatchedWhy || (listTool ? 'no card holds this project\'s threads' : 'the thread listing is not reachable from the mod here; /board-status places this thread')
     const d = await getDoc($, 'unmatched', sessionId)
     if (d && d.data.why === why) { unmatchedWritten = true; return }
     const args: Record<string, unknown> = { action: 'set', collection: 'unmatched', doc_id: sessionId, data: { session: remoteId, transcript: sessionId, folder, why, version: VERSION, at: now() } }
@@ -639,7 +659,8 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  unread = []; unmatchedWhy = ''; unmatchedWritten = false; seenList = null; jobsWritten = ''
+  unread = []; unmatchedWhy = ''; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
+  jobsNow = null; threadId = ''; priorIds = []
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -647,17 +668,19 @@ async function refreshSession($: Engine): Promise<void> {
   let id = ''
   try { id = await $.session.id() } catch {}
   if (!id || id === sessionId) { pendingClear = false; return }
-  const oldIds = myIds()
+  const oldIds = myIds(), oldId = sessionId
   sessionId = id
   remoteId = await findRemoteId($)
   const wasClear = pendingClear
   pendingClear = false
   if (wasClear && found) {
     const f = found
+    priorIds = oldIds                     // until the entry is moved, it still carries the old id
     void moveEntry($, oldIds, id).then(() => { if (found === f) void indexWrite($, f) })
     return
   }
   reset()
+  if (oldId && !noBoard) void dropUnmatched($, oldId)   // a record keyed by the old id would linger
   startInit($)
 }
 
@@ -687,7 +710,7 @@ function noteBody(count: boolean, v: string): string {
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId) return `${v}: this chat is not on the Status Board.${told}`
-  return `${v}: this chat is not on a Status Board card yet; the board lists it as not on any card.${told} /board-status places it from the project's thread list.${ASK_STATUS} Do not add it to a card by hand unless the user asks.`
+  return `${v}: this chat (transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) is not on a Status Board card yet; the board lists it as not on any card.${told} /board-status places it from the project's thread list.${ASK_STATUS} Do not add it to a card by hand unless the user asks.`
 }
 function describe(): string {
   return describeChat() + ` Board: ${BOARD} (${boardFrom}).`
@@ -809,10 +832,10 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined || !LIST.test(String(e.tool || ''))) return next(e)
     const r = await next(e)
-    const list = readListing(r as unknown as ToolResult)
-    if (list) {
-      seenList = { list, paged: partial }
-      if (!found && remoteId && initDone && !noBoard) void placeFrom($, list)
+    const l = readListing(r as unknown as ToolResult)
+    if (l) {
+      seenList = l
+      if (!found && remoteId && initDone && !noBoard) void placeFrom($, l.list)
     }
     return r
   })

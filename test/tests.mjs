@@ -373,6 +373,45 @@ console.log('N24. a project\'s own card carrying another project\'s strays keeps
   ok(E.db.projects.brain.threads.map(t => t.label).join(',') === 'Analysis', 'stays on its card, stray dropped: ' + E.db.projects.brain.threads.map(t => t.label).join(','))
   ok(!(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'not recorded as unmatched') }
 
+console.log('N25. second review: tolerant listing parser, unmatched reason, jobs cleared on resume, duplicate own entries merged, no-verdict retry')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  // a listing with one unreadable row still counts
+  let E = await env({ db: card([{ label: 'Me', session: RID }, { label: 'Old', session: 'cse_C', url: U + 'cmsg_C' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }, { session_id: 'cse_X', thread_id: 'cmsg_X', title: '', status: 'active' }, { session_id: 'cse_C', thread_id: 'cmsg_C', title: 'Old', status: 'resolved' }] }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Me', 'bad row skipped, sync applied: ' + E.db.projects.methscope.threads.map(t => t.label).join(','))
+  // the unmatched reason after the model's listing found no card
+  E = await env({ db: { projects: { other: { name: 'Other', threads: [{ label: 'O', session: 'cse_O', url: 'https://claude.ai/code/project/chan_9?thread=cmsg_O' }] } } }, repo: null, cwd: '/x/y' })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(/no card holds this project/.test(E.db.unmatched?.['aaaaaaaa-1111-2222-3333-444444444444']?.why || ''), 'unmatched reason names the real cause: ' + E.db.unmatched?.['aaaaaaaa-1111-2222-3333-444444444444']?.why)
+  // jobs do not carry over to a resumed session's entry
+  E = await env({ db: card([{ label: 'A', transcript: 'aaaaaaaa-1111-2222-3333-444444444444' }, { label: 'B', transcript: 'bbbbbbbb-1111-2222-3333-444444444444' }]), remote: '' })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('classic.Stop', { background_tasks: [{ id: 'j', type: 'shell', status: 'running', description: 'old job' }] }); await settle()
+  E.state.id = 'bbbbbbbb-1111-2222-3333-444444444444'
+  await E.fire('turn.start', {}); await settle(); await settle()
+  ok(!(E.db.projects.methscope.threads[1].jobs || []).length, 'resumed entry has no stale jobs')
+  // two entries for one thread merge into one
+  E = await env({ db: card([{ label: 'Me', session: RID, status: 'idle' }, { label: 'New thread', transcript: 'aaaaaaaa-1111-2222-3333-444444444444', url: U + 'cmsg_ME' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  const th = E.db.projects.methscope.threads
+  ok(th.length === 1 && th[0].session === RID && th[0].transcript && th[0].url === U + 'cmsg_ME', 'merged into one entry: ' + JSON.stringify(th))
+  // a "gave no verdict" refusal is retried once
+  E = await env({ db: card([{ label: 'Me', session: RID }]) })
+  await E.fire('session.start', {}); await settle()
+  E.state.denyWrites = 'once'
+  await E.fire('turn.start', {}); await settle()
+  ok(E.entry('methscope').status === 'thinking', 'write retried after a no-verdict refusal') }
+
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()
