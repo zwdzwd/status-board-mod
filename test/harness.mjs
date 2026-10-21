@@ -1,6 +1,6 @@
 // Run from the repo root: npm i --no-save typescript && node test/tests.mjs
 import fs from 'fs'; import os from 'os'; import path from 'path'; import ts from 'typescript'
-const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
+const BOARD = 'https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T'
 export async function load() {
   const src = fs.readFileSync(process.env.SRC || new URL('../hooks/register.ts', import.meta.url), 'utf8')
   const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText

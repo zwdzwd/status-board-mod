@@ -1,5 +1,5 @@
 import { load, makeEnv, settle } from './harness.mjs'
-const BOARD = 'https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF'
+const BOARD = 'https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T'
 let pass = 0, fail = 0
 const ok = (cond, msg) => { if (cond) pass++; else { fail++; console.log('  FAIL:', msg) } }
 const card = (threads = []) => ({ projects: { methscope: { name: 'MethScope', repo: 'zhou-lab/MethScope', threads } } })

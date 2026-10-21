@@ -11,7 +11,7 @@ Three parts, one version number (`VERSION`; the same string is in
   every turn. A project conversation has no ArtifactData tool, so the mod writes nothing
   there; the project's Claude keeps the card's thread list in sync by the rules instead.
 - **The board page** (`board/project-board.html`): the source of the Status Board
-  artifact (https://claude.ai/artifact/LYx5fKvoHhPNbceSvStkRF, capabilities `db` and
+  artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
   `user`). After a change, publish it to that same URL.
 - **The rules** (`board/rules.md`): what every project's Claude reads from the board
   (`meta/instruction` in the board's database, field `rules`). After a change, write it
