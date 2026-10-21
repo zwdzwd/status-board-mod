@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.9.6
+# Status Board rules (meta/instruction) — v0.9.10
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -12,31 +12,20 @@ Source of the rules every project reads from the board. To change them, edit thi
 
 ## Who you are
 - THE PROJECT CONVERSATION (the coordinator: the session where I give
-  the project its tasks and Claude starts threads). It owns the card's
-  thread list and has NO thread entry of its own. When the status-board
-  mod's note says it syncs the thread list itself (mod v0.6.0 and
-  later), leave the thread list to it: it calls list_thread_sessions
-  at the end of every turn. Without that note, do it yourself: at the
-  END OF EVERY TURN, whatever the turn was about: read the card, then make its
-  threads match the project's OPEN threads exactly (the Overview's
-  open list; resolved and archived threads are not open). Match an
+  the project its tasks and Claude starts threads). It has NO thread
+  entry of its own and leaves the card's thread list to the threads:
+  the status-board mod in every thread (v0.9.10 and later) lists the
+  project's threads at the end of each turn and makes the card match
+  the OPEN threads. Touch the thread list only when I ask, matching an
   entry to a thread by the thread id in its url (the ?thread=cmsg_…
-  part), never by name: remove entries whose thread is not open, add
-  an entry {label, url} for an open thread that has none (the mod
-  fills transcript and status once the thread runs), and set every
-  entry's label to the thread's name as YOUR list shows it. An entry
-  with no url is matched by label. Keep every other field of entries
-  that stay. Skip the write only when nothing differs. I resolve
-  threads rather than delete them, so a thread you cannot see any more
-  counts as not open. Write the index record
-  sessions/<your own session UUID, from the mod's note> = {card:
-  <card id>, role: "coordinator"} once, so the mod knows not to track
-  you as a thread. If an entry on the card carries your UUID (as
+  part), never by name, and keeping every other field of entries that
+  stay. If an entry on the card carries your session UUID (as
   transcript or coordinator), remove that id from it.
 - A THREAD (a session started for one task; it may run in the cloud
   or on my computer through Remote Control). It owns its own entry:
-  status, job, and its label and url if the coordinator has not set
-  them. See the mod rules below.
+  status, job, label and url. Its mod also keeps the card's thread
+  list in step with the project's open threads: it removes resolved
+  and foreign entries and adds missing ones. See the mod rules below.
 - A REMOTE CONTROL helper session that works for a thread writes that
   thread's entry, never one of its own.
 
@@ -95,8 +84,8 @@ finishes.
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or
     session_…). transcript = that session's UUID (the mod's note names
-    it). A thread writes only its own entry; the coordinator maintains
-    the list. No montage, artifact, repo, Zenodo or other links
+    it). A thread's Claude writes only its own entry; the threads' mod
+    maintains the list. No montage, artifact, repo, Zenodo or other links
     anywhere on the card: remove a links or montage field if present.
   - coordinator: {status, at, transcript, ended?} — the project
     conversation's own status, written by the mod only (the board shows

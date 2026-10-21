@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.9'
+const VERSION = '0.9.10'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -53,6 +53,7 @@ let noBoard = false                      // this session has no ArtifactData too
 let loadedTool = false                   // ToolSearch was tried for ArtifactData
 let listTool: string | null = null       // the thread-listing tool, '' once probed and absent
 let probed: ToolResult | null = null     // the probe's listing, reused by the first sync
+let partial = false                      // the last listing had more pages: remove nothing on it
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -339,7 +340,7 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
 // ---- Project conversations (coordinators) ----
 // The project conversation is the session that can start the project's threads. Its thread-listing
 // tool is found by name, or by trying the names under the project tools' prefix. A thread has a
-// listing too, which only helps it find its card. In practice project
+// listing too, which finds its card and keeps the card's thread list in sync. In practice project
 // conversations have no ArtifactData, so the sync below only runs where both tools exist.
 async function listToolName($: Engine): Promise<string> {
   if (listTool !== null) return listTool
@@ -399,6 +400,7 @@ async function projectThreads($: Engine): Promise<ProjThread[] | null> {
   if (probed) { r = probed; probed = null }
   else { try { r = await limit($, $.tool.call({ tool: name } as any) as Promise<ToolResult>, 20000, 'thread listing') } catch { return null } }
   if (r.deny !== undefined || r.isError) return null
+  partial = /"?next_cursor"?\s*:\s*"[^"]/.test(String(r.text ?? '') + JSON.stringify(r.result ?? null))
   return threadRecords(r.result) || threadRecords(r.text)
 }
 
@@ -427,9 +429,11 @@ async function detectCoordinator($: Engine): Promise<void> {
   } catch {}
 }
 
-// Make the card's thread list match the project's open threads. Entries the listing does not know
-// are removed, except one a thread added in the last 15 minutes that the listing may not show yet;
-// a listing with no open thread changes nothing.
+// Make the card's thread list match the project's open threads. A thread does this at the end of
+// every turn, and so does a project conversation that has ArtifactData. Entries the listing does not
+// know are removed, except one a thread added in the last 15 minutes that the listing may not show
+// yet, and none at all when the listing is only a first page; a listing with no open thread changes
+// nothing.
 async function syncThreadList($: Engine, cardId: string): Promise<string> {
   const list = await projectThreads($)
   if (!list) return 'thread list not readable'
@@ -444,7 +448,7 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
       if (!t) continue
       const m = list.find(p => matchesThread(p, t)) || list.find(p => p.name.toLowerCase() === String(t.label || '').toLowerCase())
       const fresh = !m && !!t.at && Date.now() - Date.parse(t.at) < 15 * 60000 && (t.label === PLACEHOLDER || !t.url)
-      if (fresh) { kept.push(t); continue }
+      if (fresh || (!m && partial)) { kept.push(t); continue }
       if (!m || !m.open || used.has(m)) continue
       used.add(m)
       kept.push(m.name !== t.label ? { ...t, label: m.name } : t)
@@ -465,6 +469,13 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
     } catch (err) { if (!isConflict(err)) throw err }
   }
   return 'card kept changing; next turn'
+}
+
+// A thread keeps its card's thread list in step with the project's threads, after its own status.
+function syncThreads($: Engine): Promise<void> {
+  const f = found
+  if (!f) return Promise.resolve()
+  return enqueue($, 'thread list sync', async () => { $.ui.status(`board: ${f.name} threads: ${await syncThreadList($, f.cardId)}`) })
 }
 
 // ---- Startup ----
@@ -492,6 +503,7 @@ async function init($: Engine): Promise<void> {
       if (!viaIndex) void indexWrite($, found)
       void setStatus($, turnActive ? 'thinking' : 'idle', undefined, false)
       $.ui.status(`board: ${found.name} / ${found.label}`)
+      if (listTool) void syncThreads($)
     } else if (noBoard) {
       report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
       $.ui.status('board: no ArtifactData tool in this session')
@@ -549,12 +561,12 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 function noteBody(count: boolean, v: string): string {
-  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. Keep the card's thread list in step with the project's threads as the board's rules say.${IN_PLACE}`
+  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. The project's threads keep the card's thread list in step with the open threads; leave it to them unless the user asks.${IN_PLACE}`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
   if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
-  if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). At the end of each turn the mod tries to make the card's thread list match the project's open threads; if the list still looks wrong, fix it by the board's rules. Add no entry for yourself.${IN_PLACE}`
+  if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). The project's threads keep the card's thread list in step with the open threads at the end of each of their turns, and the mod does the same here. Add no entry for yourself.${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself; if you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}; if you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId || (!told && reportedText)) return `${v}: this chat is not on the Status Board.${told}`
@@ -737,6 +749,7 @@ export const register: Register = on => {
         const d = reason === 'answer' ? await decide($, answer) : { status: 'idle', job: undefined as string | undefined }
         if (seq !== turnSeq) return
         await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
+        if (listTool && found) await syncThreads($)
       } catch (err) { $.ui.status(`board: end of turn failed (${msg(err).slice(0, 60)})`) }
     })()
     return out

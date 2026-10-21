@@ -148,6 +148,24 @@ console.log('M. project conversation with list_threads; listing parser: open/clo
   await E.fire('session.start', {}); await settle()
   ok(E.entry('mine')?.session === RID && E.db.projects.methscope.threads.length === 1, 'registered on its project\'s card') }
 
+console.log('M5. a thread keeps its card\'s thread list in step with the project\'s open threads')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const threads = [{ label: 'New thread', session: RID, transcript: 'aaaaaaaa-1111-2222-3333-444444444444', status: 'idle' },
+    { label: 'Old', session: 'cse_C', url: U + 'cmsg_C' }, { label: 'BoardMac', session: 'cse_OTHER', url: 'https://claude.ai/code/project/chan_2?thread=cmsg_OTHER', at: '2020-01-01T00:00:00Z' }]
+  const listing = { sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Mac', status: 'active' }, { session_id: 'cse_B', thread_id: 'cmsg_B', title: 'Analysis', status: 'active' }, { session_id: 'cse_C', thread_id: 'cmsg_C', title: 'Old', status: 'active', resolved: true }] }
+  let E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing, wrap: true })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
+  const th = E.db.projects.methscope.threads
+  ok(th.map(t => t.label).join(',') === 'Mac,Analysis', 'resolved and foreign removed, missing added, own label set: ' + th.map(t => t.label).join(','))
+  ok(th[0].status === 'idle' && th[0].transcript, 'own entry keeps its fields')
+  ok(th[1].url === U + 'cmsg_B' && th[1].session === 'cse_B', 'added entry has url and session')
+  console.log('M6. a listing with more pages removes nothing')
+  E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing: { ...listing, next_cursor: 'abc' } })
+  await E.fire('session.start', {}); await settle()
+  ok(E.db.projects.methscope.threads.some(t => t.label === 'BoardMac'), 'unknown entries kept on a partial listing')
+  ok(!E.db.projects.methscope.threads.some(t => t.label === 'Old'), 'a listed resolved thread still goes') }
+
 const R = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'aaaaaaaa-1111-2222-3333-444444444444'
 console.log('N1. an entry written by the coordinator (session id, no transcript) is found, not duplicated')
 { const E = await env({ db: card([{ label: 'Writing', session: R, url: 'https://claude.ai/code/project/chan_1?thread=cmsg_W' }]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
