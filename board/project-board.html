@@ -19,11 +19,13 @@
   --bg:#0f161b; --panel:#17212a; --fg:#e4ebef; --muted:#93a3ae; --line:#2a3743; --accent:#4fb8c4; --accent-soft:#163238;
   --think:#6ea8f0; --think-soft:#16263a; --ok:#5cc47f; --ok-soft:#163223; --warn:#e3a94a; --warn-soft:#352a14; --bad:#f07a45; --bad-soft:#3a1e12; --idle:#8d9aa6; --idle-soft:#222d36; color-scheme:dark}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13px;line-height:1.45}
-.wrap{max-width:1240px;margin:0 auto;padding-block:24px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+.wrap{max-width:1240px;margin:0 auto;padding-block:14px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:12px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px}
+.ttl{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+header .hbtns{margin-left:auto}
 .hbtns{display:flex;gap:6px;flex-wrap:wrap}
-h1{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,4vw,30px);line-height:1.1;margin:0}
-.sub{color:var(--muted);font-size:13px;margin:2px 0 0}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(20px,3vw,24px);line-height:1.1;margin:0}
+.sub{color:var(--muted);font-size:12px;margin:0}
 .btn{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;text-decoration:none;white-space:nowrap}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.go{background:var(--accent);border-color:var(--accent);color:var(--panel)}
@@ -31,7 +33,7 @@ h1{font-family:var(--f-display);font-weight:700;font-size:clamp(24px,4vw,30px);l
 a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
 .s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--bad)} .s-blocked .dot{background:var(--bad)}
-.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted)}
 .legend>span{display:inline-flex;align-items:center;gap:6px}
 .jump{display:flex;flex-wrap:wrap;gap:6px}
 .jump a{font-size:13px;color:var(--fg);text-decoration:none;border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 10px}
@@ -98,14 +100,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 
 <div class="wrap">
   <header>
-    <div>
+    <div class="ttl">
       <h1>Status Board</h1>
       <p class="sub" id="sub">Every project at a glance.</p>
     </div>
+    <div class="legend" aria-label="Thread colors"><span class="s-thinking" title="Claude is on it"><span class="dot"></span>Thinking</span><span class="s-working" title="Background jobs are running"><span class="dot"></span>Working</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
     <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">Copy skill setup</button></div>
   </header>
-
-  <div class="legend" aria-label="Thread colors"><span class="s-thinking"><span class="dot"></span>Thinking (Claude is on it)</span><span class="s-working"><span class="dot"></span>Working (background jobs running)</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
 
   <div id="board" aria-live="polite">
     <div class="empty">Loading projects…</div>
