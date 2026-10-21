@@ -211,7 +211,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
     const txt = el("div",{class:"text"}); body.append(txt);
     if (p.summary) txt.append(el("p",{class:"line sum",text:p.summary}));
-    const nx = first(p.next); if (nx) txt.append(el("p",{class:"line next"}, el("b",{text:"N",title:"Next"}), nx));
+    // The Next line always shows its letter, empty when there is no next step.
+    const nx = first(p.next); txt.append(el("p",{class:"line next"}, el("b",{text:"N",title:"Next"}), nx || ""));
     const bl = asks(p)[0] || first(p.blocker) || first(p.blockers); if (bl) txt.append(el("p",{class:"line bad"}, el("b",{text:"W",title:"Waiting on you"}), bl));
     if (!p.summary && !nx && !bl) txt.append(el("p",{class:"line muted",text:"No update yet."}));
     body.append(r);
@@ -229,7 +230,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
     if (p.summary) t.append(el("p",{text:p.summary}));
-    const nx = arr(p.next); if (nx.length) t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.join(" · ")));
+    const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.join(" · ")));
     const bl = asks(p).concat(first(p.blocker) ? [p.blocker] : arr(p.blockers)); if (bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"})); bl.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
