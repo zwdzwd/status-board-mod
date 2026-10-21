@@ -103,6 +103,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .skillbox pre{margin:0;font-family:var(--f-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;user-select:all}
 .unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
 .unmatched b{font-weight:600}
+.note{display:flex;flex-direction:column;gap:1px;margin-top:4px}
+.note .route{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.note .proj{font-size:11px;font-weight:600;border:1px solid var(--line);border-radius:4px;padding:0 5px;background:var(--idle-soft);color:var(--fg)}
+.note .arrow{color:var(--muted);font-size:12px}
+.note p{font-size:12.5px;color:var(--muted)}
+.note.unread .proj{border-color:var(--bad)} .note.unread p{color:var(--bad)}
 .mail{font-size:10.5px;font-weight:600;color:var(--bad);background:var(--bad-soft);border-radius:999px;padding:0 6px;flex-shrink:0}
 [hidden]{display:none!important}
 </style>
@@ -263,7 +269,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     // Notes between projects: unread ones to this project, and the latest few either way.
     const notes = messages.filter(m => m.to === p.id || m.from === p.id).sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 5);
     if (notes.length){ const w = el("div",null, el("b",{text:"Notes (" + unreadFor(p.id).length + " unread)"}));
-      notes.forEach(m => w.append(el("p",{class:m.to === p.id && !m.read_at ? "bad" : "muted",text:(m.to === p.id ? "from " + m.from : "to " + m.to) + ", " + ago(m.at) + ": " + (m.subject || "") + (m.to === p.id && !m.read_at ? " (unread)" : "")})));
+      const pname = id => { const q = projects.find(x => x.id === id); return q ? (q.name || q.id) : id; };
+      notes.forEach(m => { const fresh = m.to === p.id && !m.read_at;
+        w.append(el("div",{class:"note" + (fresh ? " unread" : "")},
+          el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:ago(m.at) + (fresh ? " · unread" : "")})),
+          el("p",{text:m.subject || ""}))); });
       t.append(w); }
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
   }
