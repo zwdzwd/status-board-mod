@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.11.4
+# Status Board rules (meta/instruction) — v0.12.0
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -44,21 +44,13 @@ does the per-turn bookkeeping by itself:
     transcript = the UUID) on the card that holds the project's other
     threads, as the project's thread list shows them. A repository or
     folder match alone never places a thread, since several projects
-    share one (writing, labjournal). The mod fetches that list itself,
-    through the hearthbot server where the tool call is refused; a
-    thread it cannot place goes on the board's "unmatched" list (shown
-    in red at the top), never on a guessed card. On your first turn, fix that entry's label (the
-    thread's name as the project's thread list shows it) and url (this
-    thread's link), touching nothing else. When the mod says it could
-    not match a card (a folder shared by several projects, such as the
-    writing repo), add the entry yourself on THIS project's card:
-    label, url (the project link plus ?thread=<id>; if you cannot find
-    the id, leave url empty), session, transcript from the mod's note.
-    Never invent a label. ONE ENTRY PER THREAD: if an entry for this
-    thread already exists (same url, or added by the coordinator with
-    your label), fill it instead of adding another. Whenever you add or
-    change this thread's entry, also write sessions/<your UUID> =
-    {card: <card id>, label};
+    share one (writing, labjournal). The mod fetches that list itself
+    where it can; on Mac Remote Control only the thread's own listing
+    call (/board-status) reaches it. A thread it cannot place goes on
+    the board's "unmatched" list (shown in red at the top), never on a
+    guessed card. The listing also names the entry and fills in its
+    link. Add or edit a thread's entry by hand only when I ask; never
+    invent a label, and keep ONE ENTRY PER THREAD;
   - it writes the thread's status: "thinking" while Claude is on a
     turn, "waiting_on_you" when the reply asks me something, "idle"
     otherwise; and, at the end of every turn, the thread's jobs: the
@@ -67,14 +59,14 @@ does the per-turn bookkeeping by itself:
     when nothing runs. The board lights "working" on a thread with
     jobs;
   - in auto mode the mod's board writes need one approval that only
-    the thread's own write earns; until then its note asks for one
-    small write (the thread's sessions/<UUID> record) on the first
-    turn;
+    the thread's own write earns: the check-in write of /board-status
+    (collection "checkins", doc_id = the thread's cmsg_ id), sent at
+    the start of each fresh session;
   - it stamps the entry ended when the session ends. The board shows a
     thread while it has been active in the last 8 hours and its session
     has not ended since; otherwise the thread is quiet (one click away
     on the card) and comes back when used again.
-Without the mod's note, do that bookkeeping yourself: write status
+Where the status-board plugin is not installed, do that bookkeeping yourself: write status
 "thinking" before other work and the end state after the reply is
 settled, each with at = ISO now; set jobs to the background work
 that outlives the turn ([{text}], one short line each) and to [] when
@@ -82,7 +74,8 @@ it finishes.
 
 ## The card
 - Set the card's repo field once to this repository's owner/name (from
-  git remote), so the mod can match new threads to the card.
+  git remote). The mod uses it only to place the first thread of a
+  card that has no threads yet.
 - Update the rest of the card at the end of a session where something
   real changed (result, decision, new blocker, finished step), or when
   I say "update the board". Skip it when nothing changed.
@@ -101,13 +94,10 @@ it finishes.
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or
     session_…). transcript = that session's UUID (the mod's note names
-    it). A thread's Claude writes only its own entry; the threads' mod
-    maintains the list. No montage, artifact, repo, Zenodo or other links
+    it). The mod writes each thread's entry; /board-status in a thread
+    makes the list match the project's open threads. No montage, artifact, repo, Zenodo or other links
     anywhere on the card: remove a links or montage field if present.
-  - coordinator: {status, at, transcript, ended?} — the project
-    conversation's own status, written by the mod only (the board shows
-    it as the stripe on the card's left edge). Never write or remove it;
-    when you update the card, leave this field as it is.
+  - coordinator: a legacy field from older mods; leave it as it is.
   - category: paper | software | misc (grants, talks, personal work and
     anything else; older cards may say grant, talk or personal, which
     the board also files under Misc). It picks the

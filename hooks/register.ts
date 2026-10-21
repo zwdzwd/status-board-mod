@@ -1,12 +1,14 @@
 import type { Register, EngineInterface as Engine } from 'claude-code'
 
 // Status Board mod. Keeps this chat's entry on the Status Board current: thinking at the start of a
-// turn, working while a shell or remote command runs, waiting on you / idle (+ a job line) at the end.
-// The board is an artifact with a document database; each project is a card in "projects", and a
-// card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
-// cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
+// turn, waiting on you or idle at the end, and the background jobs still running. The board is an
+// artifact with a document database; each project is a card in "projects", and a card lists its chats
+// under "threads". An entry names its chat by "session" (the remote session id, cse_… / session_…,
+// which the project's own tools use) and "transcript" (this process's session id). The card's thread
+// list changes only when the user sends /board-status (the board-status skill): the thread's listing
+// call then places it and makes the list match the project's open threads.
 
-const VERSION = '0.11.4'
+const VERSION = '0.12.0'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -15,23 +17,19 @@ let BOARD = FALLBACK
 let boardFrom = 'built in'
 const NOTE_ID = 'status-board:note'
 // /board-status is handled in the chat where it is typed; a project conversation must not start a thread for it.
-const IN_PLACE = ' When the user sends /board-status, answer it in this chat and update this project\'s card yourself by the board\'s rules; never start a thread for it.'
+const IN_PLACE = ' When the user sends /board-status here, update this project\'s card yourself by the board\'s rules, in this chat; never start a thread for it.'
 const PLACEHOLDER = 'New thread'
 // The project's thread listing, under either name; threads have one too.
 const LIST = /(^|__)(list_threads|list_thread_sessions)$/
 // Tools only a project conversation has: those that start threads.
 const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
-type Thread = { jobs?: { text: string; type: string; id: string }[]; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
+type Job = { text: string; type: string; id: string }
+type Thread = { jobs?: Job[]; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
 type ProjThread = { ids: string[]; name: string; open: boolean }
-
-// Job values with a meaning of their own (see setStatus).
-const KEEP = '__keep__'          // keep the entry's job, or start a generic one
-const TOOL = '__tool__:'         // a command is running: show it as the job, remembering the old one
-const RESTORE = '__restore__'    // the command ended: put the old job back
 
 // ---- State of this session ----
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
@@ -45,7 +43,6 @@ let initDone = false                     // the lookup at start has finished
 let initPromise: Promise<void> = Promise.resolve()
 let initFailed = 0                       // lookups that failed on a board error (retried at the next turns)
 let turnActive = false
-let toolDepth = 0                         // shell or remote commands running now
 let turnSeq = 0                          // bumps at every main-loop turn start
 let pendingClear = false                 // a /clear ended the conversation; the thread goes on under a new id
 let busy: Promise<void> = Promise.resolve()   // board writes run one at a time, in order
@@ -53,23 +50,16 @@ let busy: Promise<void> = Promise.resolve()   // board writes run one at a time,
 let noBoard = false                      // this session has no ArtifactData tool
 let loadedTool = false                   // ToolSearch was tried for ArtifactData
 let listTool: string | null = null       // the thread-listing tool, '' once probed and absent
-let probed: ToolResult | null = null     // the probe's listing, reused by the first sync
+let probed: ToolResult | null = null     // the probe's listing, reused by the first placement
 let partial = false                      // the last listing had more pages: remove nothing on it
-// Where the mod cannot call the listing itself, the model calls it once a turn; its result waits here
-// and is applied with the next status write.
+// The model's thread-listing call (on /board-status): applied with the next status write.
 let seenList: { list: ProjThread[]; paged: boolean } | null = null
-// In auto mode a write to an artifact needs the session's approval, which only the model's own write
-// can earn; it then covers the mod's writes for the rest of the session. Until a write has gone
-// through, the note asks the model for one small write: this chat's index record.
-let granted = false
 // Notes to this thread's project on the board ("messages", see the rules), unread: shown in the note.
 let unread: string[] = []
 // The background work still running at the end of the last turn, as Claude Code reports it to Stop
 // hooks: the thread's "jobs" on the card. null until a report has come.
-type Job = { text: string; type: string; id: string }
 let jobsNow: Job[] | null = null
 let jobsWritten = ''
-let indexVersion: number | null = null   // sessions/<id>'s version, for the write the note asks for
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -197,8 +187,7 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   }
   // Auto mode may refuse a call no request asked for, asking for it to be issued once more: do that.
   const refusal = String(r.deny ?? (r.isError ? r.text : '') ?? '')
-  if (/gave no verdict/i.test(refusal)) {
-    r = await boardCall($, args, ms) }
+  if (/gave no verdict/i.test(refusal)) r = await boardCall($, args, ms)
   if (r.missing) { noBoard = true; throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
@@ -206,7 +195,6 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
     throw new Error(text)
   }
   lastError = ''
-  if (args.action !== 'get' && args.action !== 'list' && args.action !== 'query') granted = true
   return String(r.text ?? '')
 }
 const isConflict = (err: unknown) => /version/i.test(msg(err))
@@ -258,8 +246,8 @@ async function indexWrite($: Engine, f: Found): Promise<void> {
   } catch {}
 }
 
-// The card of this session's project, for a chat not on the board yet: the card whose repo field is
-// this repository's owner/name, else the card named like the repository or a specific folder.
+// A card matched by this repository's owner/name, else by the repository's or a specific folder's
+// name. Only a tie-break for threadCard: several projects can share one repository.
 const GENERIC = new Set(['home', 'users', 'user', 'root', 'claude', 'app', 'apps', 'src', 'repo', 'repos', 'code', 'work', 'workspace', 'projects', 'tmp', 'mnt', 'outputs', 'documents', 'desktop'])
 async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
   const names: string[] = []
@@ -288,11 +276,10 @@ async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
   return null
 }
 
-// The card a new thread registers on. Where the session can list its project's threads, the card
-// holding one of them is the project's. A card matched only by repository or name is then refused
-// when it lists threads the listing does not know: another project working in the same repository.
-// Without a listing the thread is not placed at all: several projects can share a repository or
-// folder (writing, labjournal), so a guess from those would file it on another project's card.
+// The card a new thread registers on: the card holding one of its project's other threads, by the
+// project's thread listing. Failing that, a card matched by repository or name, but only one that
+// holds no other project's threads (a new project's card). Without a listing nothing is placed:
+// several projects can share a repository or folder (writing, labjournal).
 async function threadCard($: Engine, docs: Card[], given?: ProjThread[]): Promise<Card | null> {
   const list = given ?? (listTool ? await projectThreads($) : null)
   if (!list) return null
@@ -308,14 +295,13 @@ const othersOn = (c: Card) => threadsOf(c).filter(t => t && !mine(t) && (threadI
 // The card holds threads of the project the listing is from, or none at all.
 const belongsTo = (c: Card, list: ProjThread[]) => { const o = othersOn(c); return !o.length || o.some(t => list.some(p => matchesThread(p, t))) }
 
-// Add this session as a thread of a card. The label and url are unknown to the mod; the thread's
-// own Claude fills them in (the note asks for that until it is done).
+// Add this session as a thread of a card, with a placeholder label; the next listing names it.
 async function registerThread($: Engine, card: Card): Promise<Found | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const fresh = await getCard($, card.id)
     if (!fresh) return null
     const existing = findIn([fresh]); if (existing) return existing
-    const entry: Thread = { label: PLACEHOLDER, transcript: sessionId, status: turnActive ? 'thinking' : 'idle', at: now(), job: '' }
+    const entry: Thread = { label: PLACEHOLDER, transcript: sessionId, status: turnActive ? 'thinking' : 'idle', at: now() }
     if (remoteId) entry.session = remoteId
     try {
       await call($, { action: 'update', collection: 'projects', doc_id: card.id, if_version: fresh.version, data: { threads: threadsOf(fresh).concat([entry]) } })
@@ -328,14 +314,11 @@ async function registerThread($: Engine, card: Card): Promise<Found | null> {
 // ---- Writing this chat's status ----
 // Writes this chat's entry and nothing else, re-reading the card first and pinning the write to its
 // version, so other chats' entries are kept. The entry and ids are taken when the write is asked
-// for, not when it runs, so a /clear in between cannot point it at the wrong entry.
-// status: "" keeps the entry's status. job: undefined leaves the job alone, "" clears it, KEEP keeps
-// it (or starts a generic one), TOOL+text shows a running command, RESTORE puts the old job back.
-// ended: true stamps the entry as ended, false clears the stamp. waiting: what the user is asked
-// for, kept while the status is waiting_on_you and dropped with any other status.
-let prevJob: string | undefined          // the job a running command replaced
-let toolJob = ''                         // the text shown for that command
-function setStatus($: Engine, status: string, job?: string, ended?: boolean, waiting?: string): Promise<void> {
+// for, not when it runs, so a /clear in between cannot point it at the wrong entry. A model listing
+// waiting in seenList is applied in the same write. status: "" keeps the entry's status. ended: true
+// stamps the entry as ended, false clears the stamp. waiting: what the user is asked for, kept while
+// the status is waiting_on_you.
+function setStatus($: Engine, status: string, ended?: boolean, waiting?: string): Promise<void> {
   const f = found, ids = myIds(), transcript = sessionId, remote = remoteId
   if (!f) return Promise.resolve()
   return enqueue($, 'status write', async () => {
@@ -357,33 +340,29 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         if (waiting && status === 'waiting_on_you') n.waiting = waiting
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
-        if (job === KEEP) n.job = (typeof t.job === 'string' && t.job.trim() && t.job !== toolJob) ? t.job : (prevJob || `background work since ${at.slice(11, 16)} UTC`)
-        else if (job !== undefined && job.startsWith(TOOL)) { if (prevJob === undefined) prevJob = typeof t.job === 'string' ? t.job : ''; toolJob = job.slice(TOOL.length); n.job = toolJob }
-        else if (job === RESTORE) { n.job = prevJob !== undefined ? prevJob : (t.job === toolJob ? '' : (t.job ?? '')) }
-        else if (job !== undefined) n.job = job
-        if (jobsNow) { n.jobs = jobsNow; n.job = '' }
+        if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
         return n
       })
-      if (seen && !belongsTo(card, seen.list)) {
+      if (seen && !seen.paged && !belongsTo(card, seen.list)) {
         // This chat sits on another project's card (an old repository guess): leave that card's
         // list alone, take this chat's entry off it, and let the listing place it again.
-        th = th.filter(t => !isMine(t, ids))
-        try { await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } }) } catch {}
+        try {
+          await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th.filter(t => !isMine(t, ids)) } })
+        } catch (err) { if (isConflict(err)) continue; throw err }
         if (found === f) { found = null; registeredHere = false }
-        trace($, `left the ${f.name} card: it holds another project's threads`)
-        if (seenList === seen) void placeFrom($, seen.list)
+        say($, `board: left the ${f.name} card, which holds another project's threads`)
+        if (seenList === seen) await placeNow($, seen.list)
         return
       }
-      if (seen && seen.list.some(p => p.open)) th = syncedThreads(th, seen.list, seen.paged)
+      if (seen && seen.list.some(p => p.open)) th = syncedThreads(th, seen.list, seen.paged, ids)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
         if (seen && seenList === seen) seenList = null
-        if (job !== undefined && !job.startsWith(TOOL)) { prevJob = undefined; toolJob = '' }
         if (status) lastWrite = status
         if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
-        say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}`)
+        say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}${seen ? ' (thread list synced)' : ''}`)
         return
       } catch (err) { if (!isConflict(err)) throw err }   // someone else wrote the card: read again, once
     }
@@ -412,11 +391,11 @@ function moveEntry($: Engine, fromIds: string[], to: string): Promise<void> {
   })
 }
 
-// ---- Project conversations (coordinators) ----
-// The project conversation is the session that can start the project's threads. Its thread-listing
-// tool is found by name, or by trying the names under the project tools' prefix. A thread has a
-// listing too, which finds its card and keeps the card's thread list in sync. In practice project
-// conversations have no ArtifactData, so the sync below only runs where both tools exist.
+// ---- The project's thread listing ----
+// The project conversation is the session that can start the project's threads; the mod leaves it
+// off the board. A thread uses the listing to find its card. The listing tool is found by name, or by
+// trying the names, then the hearthbot server directly. On Mac Remote Control none of these reach it,
+// so there only the model's own listing call (on /board-status) places the thread.
 // One call of the project's thread listing: the tool by name, or the hearthbot server directly
 // ("mcp:<tool>"), which a hook can reach where $.tool.call cannot (Remote Control).
 async function callListing($: Engine, name: string): Promise<ToolResult> {
@@ -523,81 +502,59 @@ async function detectCoordinator($: Engine): Promise<void> {
   } catch {}
 }
 
-// Make the card's thread list match the project's open threads. A thread does this at the end of
-// every turn, and so does a project conversation that has ArtifactData. Entries the listing does not
-// know are removed, except one a thread added in the last 15 minutes that the listing may not show
-// yet, and none at all when the listing is only a first page; a listing with no open thread changes
-// nothing.
-async function syncThreadList($: Engine, cardId: string): Promise<string> {
-  const list = await projectThreads($)
-  if (!list) return 'thread list not readable'
-  if (!list.some(p => p.open)) return 'no open threads listed; card left as is'
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const card = await getCard($, cardId)
-    if (!card) return 'card not found'
-    const before = threadsOf(card)
-    if (!coordinator && !belongsTo(card, list)) return 'card holds another project\'s threads; not synced'
-    const kept = syncedThreads(before, list, partial)
-    if (JSON.stringify(kept) === JSON.stringify(before)) return 'in sync'
-    try {
-      await call($, { action: 'update', collection: 'projects', doc_id: cardId, if_version: card.version, data: { threads: kept } })
-      return `synced: ${kept.length} open thread${kept.length === 1 ? '' : 's'}`
-    } catch (err) { if (!isConflict(err)) throw err }
+// The card's threads made to match a listing: entries of threads the listing shows resolved or does
+// not know go, open threads without an entry are added, names and missing links are filled in.
+// Entries are matched by thread id or session, never by name. This chat's own entry always stays, as
+// does one added in the last 15 minutes that the listing may not show yet, and, when the listing is
+// only a first page, every entry it does not know.
+function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean, ids: string[]): Thread[] {
+  const used = new Set<ProjThread>()
+  const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
+  const kept: Thread[] = []
+  for (const t of before) {
+    if (!t) continue
+    const m = list.find(p => matchesThread(p, t))
+    const own = isMine(t, ids)
+    const fresh = !m && !!t.at && Date.now() - Date.parse(t.at) < 15 * 60000 && (t.label === PLACEHOLDER || !t.url)
+    if (!m && (own || fresh || paged)) { kept.push(t); continue }
+    if (!m || used.has(m) || (!m.open && !own)) continue
+    used.add(m)
+    const tid = !t.url && base ? m.ids.find(i => /^cmsg_/.test(i)) : ''
+    kept.push(m.name !== t.label || tid ? { ...t, label: m.name, ...(tid ? { url: `${base}?thread=${tid}` } : {}) } : t)
   }
-  return 'card kept changing; next turn'
-}
-
-// The card's threads made to match a listing (see syncThreadList).
-function syncedThreads(before: Thread[], list: ProjThread[], paged: boolean): Thread[] {
-  {
-    const used = new Set<ProjThread>()
-    const base = (before.map(t => String((t && t.url) || '')).find(u => /\?thread=/.test(u)) || '').split('?')[0]
-    const kept: Thread[] = []
-    for (const t of before) {
-      if (!t) continue
-      const m = list.find(p => matchesThread(p, t)) || list.find(p => p.name.toLowerCase() === String(t.label || '').toLowerCase())
-      const fresh = !m && !!t.at && Date.now() - Date.parse(t.at) < 15 * 60000 && (t.label === PLACEHOLDER || !t.url)
-      if (fresh || (!m && paged)) { kept.push(t); continue }
-      if (!m || !m.open || used.has(m)) continue
-      used.add(m)
-      const tid = !t.url && base ? m.ids.find(i => /^cmsg_/.test(i)) : ''
-      kept.push(m.name !== t.label || tid ? { ...t, label: m.name, ...(tid ? { url: `${base}?thread=${tid}` } : {}) } : t)
-    }
-    for (const p of list) {
-      if (!p.open || used.has(p)) continue
-      const tid = p.ids.find(i => /^cmsg_/.test(i)) || ''
-      const add: Thread = { label: p.name }
-      if (base && tid) add.url = `${base}?thread=${tid}`
-      const sid = p.ids.find(i => /^(cse|session)_/.test(i)); if (sid) add.session = sid
-      kept.push(add)
-    }
-    return kept
+  for (const p of list) {
+    if (!p.open || used.has(p)) continue
+    const tid = p.ids.find(i => /^cmsg_/.test(i)) || ''
+    const add: Thread = { label: p.name }
+    if (base && tid) add.url = `${base}?thread=${tid}`
+    const sid = p.ids.find(i => /^(cse|session)_/.test(i)); if (sid) add.session = sid
+    kept.push(add)
   }
+  return kept
 }
 
-
-// Register this chat from a project listing: on the card holding its project's other threads.
-function placeFrom($: Engine, list: ProjThread[]): Promise<void> {
-  return enqueue($, 'registration', async () => {
-    if (found) return
-    // A thread the listing shows resolved stays off the board; one taken off a card by hand returns.
-    const me = list.find(p => p.ids.some(i => myIds().some(m => same(i, m))))
-    if (me && !me.open) return
-    const c = await threadCard($, await cards($), list)
-    if (!c) { unmatchedWhy = skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card holds this project\'s threads'; return }
-    found = await registerThread($, c)
-    if (found) { removed = false; registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the project's thread list`) }
-  })
+// Register this chat from a project listing, on the card holding its project's other threads. A
+// thread the listing shows resolved stays off the board; one taken off a card by hand returns.
+async function placeNow($: Engine, list: ProjThread[]): Promise<void> {
+  if (found) return
+  const me = list.find(p => p.ids.some(i => myIds().some(m => same(i, m))))
+  if (me && !me.open) { removed = true; return }
+  const c = await threadCard($, await cards($), list)
+  if (!c) { unmatchedWhy = skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card holds this project\'s threads'; return }
+  found = await registerThread($, c)
+  if (found) { removed = false; registeredHere = found.label === PLACEHOLDER; void indexWrite($, found); say($, `board: registered on ${found.name} from the project's thread list`) }
 }
+const placeFrom = ($: Engine, list: ProjThread[]) => enqueue($, 'registration', () => placeNow($, list))
 
 // A thread the mod cannot place shows on the board as unmatched (collection "unmatched"), never on a
 // guessed card; the record goes once the thread is placed.
 let unmatchedWhy = ''
 let unmatchedWritten = false
-async function markUnmatched($: Engine): Promise<void> {
+const markUnmatched = ($: Engine) => enqueue($, 'unmatched record', () => unmatched($))
+async function unmatched($: Engine): Promise<void> {
   if (noBoard || !sessionId || coordinator) return
   try {
-    if (found) {
+    if (found || removed) {
       if (!unmatchedWritten) return
       const d = await getDoc($, 'unmatched', sessionId)
       if (d) await call($, { action: 'delete', collection: 'unmatched', doc_id: sessionId, if_version: d.version })
@@ -632,12 +589,7 @@ const mailNote = (f: Found) => unread.length ? ` The ${f.name} project has ${unr
 async function init($: Engine): Promise<void> {
   try {
     await detectCoordinator($)
-    if (coordinator) {
-      if (noBoard) { say($, 'board: project conversation without ArtifactData; nothing to do'); return }
-      if (!coordinator.cardId) { report = 'the Status Board mod could not find this project\'s card'; say($, 'board: project conversation, card not matched'); return }
-      say($, `board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
-      return
-    }
+    if (coordinator) { say($, `board: project conversation${coordinator.cardId ? ' for ' + coordinator.name : ''}; the mod writes nothing here`); return }
     let viaIndex = true
     found = await indexLookup($)
     if (!found && !noBoard) {
@@ -645,21 +597,20 @@ async function init($: Engine): Promise<void> {
       const docs = await cards($)
       found = findIn(docs)
       // Only a remote session (a project's thread) registers itself; a local or one-shot run does not.
-      if (!found && remoteId) { const c = await threadCard($, docs); if (c) found = await registerThread($, c) }
+      if (!found && remoteId) { const list = await projectThreads($); if (list) await placeNow($, list) }
     }
     if (found) {
       registeredHere = found.label === PLACEHOLDER
       if (!viaIndex) void indexWrite($, found)
-      try { const d = await getDoc($, 'sessions', sessionId); indexVersion = d ? d.version : null } catch {}
-      void setStatus($, turnActive ? 'thinking' : 'idle', undefined, false)
+      void setStatus($, turnActive ? 'thinking' : 'idle', false)
       say($, `board: ${found.name} / ${found.label}`)
       void checkMail($, found.cardId)
     } else if (noBoard) {
       report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
       say($, 'board: no ArtifactData tool in this session')
     } else {
-      if (remoteId) report = `the Status Board mod could not match this chat to a project card (${lastError ? 'board call failed: ' + lastError : skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card\'s repo or name matches this repository or folder'})`
-      say($, 'board: no card matched this chat')
+      if (remoteId && lastError) report = `the Status Board mod could not read the board (${lastError})`
+      say($, 'board: no card matched this chat yet')
     }
   } catch (err) {
     if (noBoard) report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
@@ -674,7 +625,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  prevJob = undefined; toolJob = ''; unread = []; unmatchedWhy = ''; unmatchedWritten = false; granted = false; indexVersion = null
+  unread = []; unmatchedWhy = ''; unmatchedWritten = false; seenList = null; jobsWritten = ''
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -707,24 +658,22 @@ function tell(count: boolean): string {
 const WHERE = () => ` (The Status Board is the artifact ${BOARD}, read and written with the ArtifactData tool; its rules are the "rules" field of collection meta, doc_id instruction.)`
 function boardNote(count: boolean): string {
   const v = `Status Board mod v${VERSION}`
-  if (!initDone) return `${v}: looking up this chat on the Status Board.${remoteId ? listAsk() : ''}`
+  if (!initDone) return `${v}: looking up this chat on the Status Board.${remoteId ? ASK_STATUS : ''}`
   return noteBody(count, v) + WHERE()
 }
-// Where the mod cannot call the thread listing itself (Remote Control), the model's call feeds it.
-// The card's thread list is synced only when the user asks, with /board-status: the model's listing
-// call then feeds the mod, which places this chat if needed and makes the list match.
-const listAsk = () => ' When the user sends /board-status, load the board-status skill and follow it here; never start a thread for it.'
+// /board-status runs the board-status skill: the thread's check-in write and its listing call.
+const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it.'
 function noteBody(count: boolean, v: string): string {
-  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. The project's threads keep the card's thread list in step with the open threads; leave it to them unless the user asks.${IN_PLACE}`
+  const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
+  if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. ${sync}${IN_PLACE}`
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
-  if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
-  if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). The project's threads keep the card's thread list in step with the open threads at the end of each of their turns, and the mod does the same here. Add no entry for yourself.${IN_PLACE}`
-  if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.${listAsk()}${mailNote(found)}`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}).${granted ? '' : ` Board writes in this session need one approval that only your own write can earn: before other work, call ArtifactData with action "set", collection "sessions", doc_id "${sessionId}", data {"card": "${found.cardId}", "label": ${JSON.stringify(found.label)}}${indexVersion !== null ? `, if_version ${indexVersion}` : ''} (on a version mismatch, read that record and write again with its version). Once it is approved, the mod's own status writes go through.`} The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself.${listAsk()}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (coordinator) return `${v}: this is a project conversation${coordinator.cardId ? ` for the ${coordinator.name} card (id ${coordinator.cardId})` : ''}; the mod writes nothing here and adds no entry for it. ${sync}${IN_PLACE}`
+  if (found && registeredHere) return `${v}: this chat is on the ${found.name} card (id ${found.cardId}) under the placeholder "${PLACEHOLDER}"; /board-status names it from the project's thread list. Do not invent a label. The mod writes this chat's status and its running background jobs by itself.${ASK_STATUS}${mailNote(found)}`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself.${ASK_STATUS}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
-  if (!remoteId || (!told && reportedText)) return `${v}: this chat is not on the Status Board.${told}`
-  return `${v}: this chat is not on the Status Board.${told} Call the project's thread-listing tool (list_thread_sessions or list_threads) once now; the mod uses its result to place this chat on its project's card.${listAsk()} If the mod still finds no card after that, and this chat is work on one of the user's projects: read the board's rules (meta/instruction, field rules), find or create the project's card, add this thread's entry with transcript ${sessionId} and session ${remoteId} (plus label and url), write sessions/${sessionId} = {card, label}, and set the card's repo field to this repository's owner/name so later threads register by themselves; the mod then writes this chat's status. If it is not project work, leave the board alone.`
+  if (!remoteId) return `${v}: this chat is not on the Status Board.${told}`
+  return `${v}: this chat is not on a Status Board card yet; the board lists it as not on any card.${told} /board-status places it from the project's thread list.${ASK_STATUS} Do not add it to a card by hand unless the user asks.`
 }
 function describe(): string {
   return describeChat() + ` Board: ${BOARD} (${boardFrom}).`
@@ -738,21 +687,19 @@ function describeChat(): string {
   return `Status Board: this chat is not on the board (transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}).${report ? ' ' + report + '.' : ''}`
 }
 
-// What a turn's final message means for the board: a question or a decision for the user; work still
-// running elsewhere (a remote session, a SLURM job, a build), shown as "working"; or done.
+// What a turn's final message means for the board: a question or a decision for the user, or not.
+// What still runs is the jobs list's business.
 const ASK = 'the message asks the user a question, or waits for the user to decide, approve, confirm or provide something'
-const RUN = 'the message says work is still running and will report later: a job, a remote or background session, a build, a process the assistant is waiting on'
-const DONE = 'the message reports finished work or information; nothing is still running and nothing is asked of the user'
-async function decide($: Engine, answer: string): Promise<{ status: string; job?: string; waiting?: string }> {
+const OTHER = 'the message reports work or information and asks nothing of the user'
+async function decide($: Engine, answer: string): Promise<{ status: string; waiting?: string }> {
   if (!answer.trim()) return { status: 'idle' }
   let k: string | undefined
-  try { k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, RUN, DONE]) } catch {}
+  try { k = await $.model.classify(`The assistant's final message of a turn:\n\n${answer.slice(-3000)}`, [ASK, OTHER]) } catch {}
   if (k === ASK) return { status: 'waiting_on_you', waiting: await askedFor($, answer) }
-  if (k === RUN) return { status: 'idle' }   // the jobs list shows what still runs
-  if (k === DONE) return { status: 'idle', job: '' }
+  if (k === OTHER) return { status: 'idle' }
   const last = answer.trim().split('\n').pop() || ''
   if (/\?\s*$/.test(last)) return { status: 'waiting_on_you', waiting: lastQuestion(answer) }
-  return { status: 'idle' }   // no label: leave the job alone
+  return { status: 'idle' }
 }
 
 // What the user is asked for, in one short line for the board: a summary by the small model, or the
@@ -777,8 +724,8 @@ async function askedFor($: Engine, answer: string): Promise<string> {
   return lastQuestion(answer)
 }
 
-// A command shown on the shared board: the program and up to two plain arguments after it, stopping
-// at the first option, so passwords, tokens and headers never reach the board.
+// A background command shown on the shared board (a job with no description): the program and up to
+// two plain arguments after it, stopping at the first option, so passwords and tokens never show.
 function jobText(tool: string, command: unknown): string {
   const words = typeof command === 'string' ? command.trim().split(/\s+/) : []
   const shown: string[] = []
@@ -823,7 +770,7 @@ export const register: Register = on => {
     if (found) {
       const left = next.budget.remainingMs
       const ms = Math.min(Number.isFinite(left) ? left : 8000, 8000) - 300
-      if (ms > 500) { try { await limit($, setStatus($, '', undefined, true), ms, 'end stamp') } catch {} }
+      if (ms > 500) { try { await limit($, setStatus($, '', true), ms, 'end stamp') } catch {} }
     }
     return next(e)
   })
@@ -843,41 +790,17 @@ export const register: Register = on => {
 
   on('command.run', { command: 'board-info' }, async () => ({ text: describe() }))
 
-  // While a command runs on a machine for more than a few seconds (a shell, a remote computer, a
-  // browser), the chat is waiting on that machine, not thinking: show it as working.
-  let toolTimer: { cancel: () => void } | null = null, toolShown = false
+  // The model's own thread-listing call (on /board-status): kept for the next status write, and used
+  // at once to place a chat that is not on a card yet.
   on('tool.call', async ($, e, next) => {
-    const name = String(e.tool || '')
-    // The model's own board write earns the session's approval for the mod's writes too.
-    if (e.agentId === undefined && name === 'ArtifactData') {
-      const r = await next(e) as unknown as ToolResult
-      const a = String(((e as any).input?.action ?? (e as any).action) || '')
-      if (r && !r.isError && r.deny === undefined && a && !['get', 'list', 'query', 'profiles'].includes(a)) granted = true
-      return r as any
+    if (e.agentId !== undefined || !LIST.test(String(e.tool || ''))) return next(e)
+    const r = await next(e)
+    const list = readListing(r as unknown as ToolResult)
+    if (list) {
+      seenList = { list, paged: partial }
+      if (!found && remoteId && initDone && !noBoard) void placeFrom($, list)
     }
-    // The model's own call of the thread listing: keep its result for the next status write.
-    if (e.agentId === undefined && LIST.test(name)) {
-      const r = await next(e)
-      const list = readListing(r as unknown as ToolResult)
-      if (list) {
-        seenList = { list, paged: partial }
-        // A new thread the mod could not place at start: the listing names its project's threads,
-        // so the card holding one of them is its card.
-        if (!found && remoteId && initDone && !noBoard) void placeFrom($, list)
-      }
-      return r
-    }
-    if (e.agentId !== undefined || !found || !/bash|shell|device|computer|remote|browser|ssh|slurm/i.test(name)) return next(e)
-    // No status write while a command runs: the board refuses the mod's writes until it returns.
-    toolDepth++
-    try { return await next(e) }
-    finally {
-      toolDepth = Math.max(0, toolDepth - 1)
-      if (toolDepth === 0) {
-        if (toolTimer) { toolTimer.cancel(); toolTimer = null }
-        if (toolShown && turnActive) { toolShown = false; void setStatus($, 'thinking', RESTORE) }
-      }
-    }
+    return r
   })
 
   // What still runs when the main loop stops: the thread's jobs list, written when it changes.
@@ -896,7 +819,6 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       turnSeq++
       turnActive = true
-      toolDepth = 0
       await refreshSession($)
       if (initDone && initFailed > 0 && initFailed < 3 && !found && !coordinator) startInit($)   // the board failed at start: try again
       if (found && initDone) void setStatus($, 'thinking')
@@ -908,8 +830,6 @@ export const register: Register = on => {
     const out = await next(e)
     if (e.agentId !== undefined) return out
     turnActive = false
-    if (toolTimer) { toolTimer.cancel(); toolTimer = null }
-    const hadTool = toolShown; toolShown = false
     const reason = e.reason
     if (composedReport && reason === 'answer') reportedText = composedReport
     composedReport = ''
@@ -920,23 +840,22 @@ export const register: Register = on => {
     void (async () => {
       try {
         await initPromise                     // a first turn can end before the lookup has
-        if (noBoard || seq !== turnSeq) return
-        if (coordinator) {
-          if (coordinator.cardId) say($, `board: coordinator of ${coordinator.name}: ${await syncThreadList($, coordinator.cardId)}`)
-          return
+        if (noBoard || coordinator || seq !== turnSeq) return
+        if (!found) found = await indexLookup($)                     // the user may have placed this chat
+        if (!found && remoteId) {                                   // a listing this turn, the model's or the mod's
+          const l = seenList ? seenList.list : await projectThreads($)
+          if (l) await placeFrom($, l)
         }
-        if (!found) found = await indexLookup($)                     // the model may have registered this chat
-        if (!found && remoteId) { const l = await projectThreads($); if (l) await placeFrom($, l) }
-        else if (found && registeredHere) {                          // the model may have fixed the label
+        if (found && registeredHere) {                               // a listing may have named the entry
           const card = await getCard($, found.cardId)
           const f = card ? findIn([card]) : null
           if (f) { found = f; registeredHere = f.label === PLACEHOLDER }
         }
         if (seq !== turnSeq) return
         if (!found) { await markUnmatched($); return }
-        const d = reason === 'answer' ? await decide($, answer) : { status: 'idle', job: undefined as string | undefined }
+        const d = reason === 'answer' ? await decide($, answer) : { status: 'idle' }
         if (seq !== turnSeq) return
-        await setStatus($, d.status, d.job === undefined && hadTool ? RESTORE : d.job, undefined, d.waiting)
+        await setStatus($, d.status, undefined, d.waiting)
         if (found) await checkMail($, found.cardId)
         await markUnmatched($)
       } catch (err) { say($, `board: end of turn failed (${msg(err).slice(0, 60)})`) }

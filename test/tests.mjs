@@ -13,7 +13,7 @@ console.log('A. new thread with a listing registers on the card holding its proj
   await settle()
   const t = E.entry('methscope'); ok(t && t.label === 'New thread', 'entry added with placeholder')
   ok(E.db.projects.methscope.threads.length === 2, 'other entry kept')
-  ok(/placeholder label "New thread"/.test(await E.note()), 'note asks to fix the placeholder')
+  ok(/placeholder "New thread"/.test(await E.note()), 'note says the entry waits for its name')
   ok(E.db.sessions[E.state.id]?.card === 'methscope', 'index written')
   await E.fire('turn.start', {}); await settle(); ok(E.entry('methscope').status === 'thinking', 'thinking at turn start')
   E.state.classify = 0
@@ -27,9 +27,7 @@ console.log('B. a folder named like a generic word does not match a card')
 { const E = await env({ db: { projects: { claude: { name: 'Claude', threads: [] } } }, cwd: '/home/claude' })
   await E.fire('session.start', {}); await settle()
   ok(!E.db.projects.claude.threads.length, 'no entry added to the "Claude" card')
-  ok(/not on the Status Board\. Tell the user/.test(await E.note()), 'unmatched chat tells the user once')
-  await E.fire('turn.start', {}); await E.note(); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
-  ok(!/Tell the user/.test(await E.note()), 'and not again after that turn') }
+  ok(/not on a Status Board card yet/.test(await E.note()) && !/Tell the user/.test(await E.note()), 'unplaced chat: the board shows it, no message to the user') }
 
 console.log('C. background jobs reported at stop become the entry\'s jobs list; none clears it')
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', job: 'SLURM 123 running', status: 'idle' }]) })
@@ -37,7 +35,7 @@ console.log('C. background jobs reported at stop become the entry\'s jobs list; 
   await E.fire('turn.start', {}); await settle()
   await E.fire('classic.Stop', { background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'Run the test suite' }, { id: 'b2', type: 'subagent', status: 'completed', description: 'old' }] }); await settle()
   let t = E.entry('methscope')
-  ok(JSON.stringify(t.jobs) === JSON.stringify([{ text: 'Run the test suite', type: 'shell', id: 'b1' }]) && t.job === '', 'running jobs listed, legacy job cleared: ' + JSON.stringify(t.jobs))
+  ok(JSON.stringify(t.jobs) === JSON.stringify([{ text: 'Run the test suite', type: 'shell', id: 'b1' }]) && t.job === undefined, 'running jobs listed, legacy job removed: ' + JSON.stringify(t.jobs))
   ok(t.status === 'thinking', 'status untouched by the jobs write: ' + t.status)
   await E.fire('turn.complete', { answer: 'Started the tests.', reason: 'answer' }); await settle()
   await E.fire('classic.Stop', { background_tasks: [] }); await settle()
@@ -110,14 +108,13 @@ console.log('L. teammates do not get the note')
 { const E = await env({ db: card([]) }); await E.fire('session.start', {}); await settle()
   const r = await E.fire('prompt.compose', { traits: ['teammate'] }, { sections: [] }); ok(!r.sections.length, 'no section for a teammate') }
 
-console.log('M. project conversation with list_threads; listing parser: open/closed words, wrapper objects and text')
+console.log('M. a project conversation writes nothing to the board')
 { const E = await env({ db: { projects: { methscope: { name: 'MethScope', threads: [{ label: 'Writing', session: 'cse_A', url: 'https://claude.ai/code/project/chan_1?thread=cmsg_A' }, { label: 'Old', session: 'cse_C' }] } } },
     tools: ['ArtifactData', 'mcp__hb__list_threads', 'mcp__hb__start_thread'], wrap: true,
     listing: { project: { id: 'cmsg_project', name: 'proj' }, sessions: [{ session_id: 'cse_A', thread_id: 'cmsg_A', title: 'Writing', status: 'unresolved' }, { session_id: 'cse_B', thread_id: 'cmsg_B', title: 'Analysis', status: 'active' }, { session_id: 'cse_C', thread_id: 'cmsg_C', title: 'Old', status: 'resolved' }] } })
   await E.fire('session.start', {}); await settle()
-  const labels = E.db.projects.methscope.threads.map(t => t.label).join(',')
-  ok(labels === 'Writing,Analysis', 'card synced to open threads: ' + labels)
-  ok(E.db.projects.methscope.threads[1].url === 'https://claude.ai/code/project/chan_1?thread=cmsg_B', 'new entry gets its url') }
+  ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Writing,Old', 'card untouched')
+  ok(/project conversation for the MethScope card/.test(await E.note()), 'note knows it is the project conversation') }
 
 
 { const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa'
@@ -138,7 +135,8 @@ console.log('M. project conversation with list_threads; listing parser: open/clo
   E = await env({ db: card([other]), repo, tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing, wrap: true })
   await E.fire('session.start', {}); await settle()
   ok(E.db.projects.methscope.threads.length === 1, 'nothing added to the other project\'s card')
-  ok(/MethScope card shares this repository/.test(await E.note()), 'says why')
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(/MethScope card shares this repository/.test(E.db.unmatched?.['aaaaaaaa-1111-2222-3333-444444444444']?.why || ''), 'unmatched record says why')
 
   console.log('M4. a thread registers on the card holding its project\'s threads, whatever the repo')
   E = await env({ db: { projects: { ...card([other]).projects, mine: { name: 'Mine', threads: [{ label: 'Writing', session: 'cse_A', url: 'https://claude.ai/code/project/chan_1?thread=cmsg_A' }] } } },
@@ -155,7 +153,7 @@ console.log('M5. an ordinary turn leaves the card\'s thread list alone; the list
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
   ok(E.db.projects.methscope.threads.length === 3, 'plain turn: list untouched')
-  ok(/When the user sends \/board-status, load the board-status skill/.test(await E.note()), 'note points /board-status to its skill')
+  ok(/sends \/board-status: load the board-status skill/.test(await E.note()), 'note points /board-status to its skill')
   await E.fire('turn.start', {}); await settle()
   await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify(listing) })
   await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle()
@@ -174,15 +172,6 @@ console.log('M5. an ordinary turn leaves the card\'s thread list alone; the list
   ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced: ' + E.db.projects.methscope.threads.map(t => t.label).join(','))
   ok(E.writes.filter(w => w.c === 'projects').length - E.writes.slice(0, before).filter(w => w.c === 'projects').length === 1, 'one card write for status and list together')
   ok(E.entry('methscope').status === 'idle', 'own status written')
-  console.log('M5d. until a board write goes through, the note asks the model for one; the model\'s write approves the session')
-  E = await env({ db: card([{ ...threads[0], label: 'Mac' }]), tools: ['ArtifactData'] })
-  E.state.denyWrites = true
-  await E.fire('session.start', {}); await settle()
-  let n5 = await E.note()
-  ok(/before other work, call ArtifactData with action "set", collection "sessions"/.test(n5), 'note asks for the approving write')
-  E.state.denyWrites = false
-  await E.fire('tool.call', { tool: 'ArtifactData', action: 'set', collection: 'sessions' }, { text: 'Database set committed.' })
-  ok(!/before other work, call ArtifactData/.test(await E.note()), 'no longer asked once the model wrote')
   console.log('M6. a listing with more pages removes nothing')
   E = await env({ db: card(threads) })
   await E.fire('session.start', {}); await settle()
@@ -338,6 +327,27 @@ console.log('N21. a thread the mod cannot place is recorded as unmatched, and th
   await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }) }); await settle()
   await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
   ok(E.entry('methscope') && !(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'placed, record removed') }
+
+console.log('N22. review fixes: own entry kept by the sync, a paged listing evicts nothing, a resolved thread is not shown as unmatched')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const old = '2020-01-01T00:00:00Z'
+  let E = await env({ db: card([{ label: 'New thread', transcript: 'aaaaaaaa-1111-2222-3333-444444444444', at: old }, { label: 'W', session: 'cse_W', url: U + 'cmsg_W' }]) , remote: '' })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_threads' }, { text: JSON.stringify({ sessions: [{ session_id: 'cse_W', thread_id: 'cmsg_W', title: 'W', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  ok(E.db.projects.methscope.threads.some(t => t.transcript === 'aaaaaaaa-1111-2222-3333-444444444444'), 'own entry kept although the listing does not show it')
+  E = await env({ db: { projects: { a: { name: 'A', threads: [{ label: 'Me', session: RID }, { label: 'X', session: 'cse_X', url: U + 'cmsg_X' }] } } } })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_threads' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }], next_cursor: 'p2' }) })
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(E.db.projects.a.threads.some(t => t.session === RID) && E.db.projects.a.threads.some(t => t.session === 'cse_X'), 'paged listing: nothing evicted')
+  E = await env({ db: { projects: { a: { name: 'A', threads: [{ label: 'Me', session: RID }, { label: 'X', session: 'cse_X', url: U + 'cmsg_X' }] } } }, tools: ['ArtifactData', 'mcp__hb__list_threads'], listing: { sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Me', status: 'active', resolved: true }, { session_id: 'cse_X', thread_id: 'cmsg_X', title: 'X', status: 'active' }] } })
+  await E.fire('session.start', {}); await settle()
+  E.db.projects.a.threads = E.db.projects.a.threads.filter(t => t.session !== RID)
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle(); await settle()
+  ok(!(E.db.unmatched || {})['aaaaaaaa-1111-2222-3333-444444444444'], 'resolved thread not recorded as unmatched') }
 
 console.log('N14. one-shot (-p) and local runs: no note, no registration')
 { const E = await env({ db: card([]), remote: '', repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })

@@ -22,7 +22,13 @@ body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13
 .wrap{margin:0;padding-block:6px 16px;padding-left:max(6px,env(safe-area-inset-left,0px));padding-right:max(6px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:10px}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px}
 .ttl{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
-header .hbtns{margin-left:auto}
+header .hbtns{flex-basis:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap}
+.howto{margin:0;font-size:12px;color:var(--muted);text-align:left}
+.howto b{color:var(--fg);font-weight:600}
+.howto code{font-family:var(--f-mono);font-size:11.5px;background:var(--accent-soft);color:var(--accent);padding:0 4px;border-radius:3px}
+.howto a,.linkbtn{color:var(--accent)}
+.linkbtn{font:inherit;background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
+.linkbtn:disabled{color:var(--muted);text-decoration:none;cursor:default}
 .hbtns{display:flex;gap:6px;flex-wrap:wrap}
 h1{font-family:var(--f-display);font-weight:700;font-size:clamp(20px,3vw,24px);line-height:1.1;margin:0}
 .sub{color:var(--muted);font-size:12px;margin:0}
@@ -107,7 +113,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       <p class="sub" id="sub">Every project at a glance.</p>
     </div>
     <div class="legend" aria-label="Thread colors"><span class="s-thinking" title="Claude is on it"><span class="dot"></span>Thinking</span><span class="s-working" title="Background jobs are running"><span class="dot"></span>Working</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
-    <div class="hbtns"><a class="btn" href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener" title="How to install the plugin on a new machine or account">Setup</a><button class="btn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">Copy skill setup</button></div>
+    <div class="hbtns"><p class="howto"><b>Start each session</b> with <code>/board-status</code>: it puts the thread on its card and syncs the card's threads. <b>Notes</b>: ask Claude to "send a note to &lt;project&gt;" or "check mail". <b>New machine</b>: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="linkbtn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">copy the skill setup</button> and paste it into any Claude session.</p></div>
   </header>
 
   <div id="unmatched" class="unmatched" hidden></div>
@@ -134,7 +140,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.10.0";
+  const VERSION = "0.12.0";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -311,7 +317,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   $("skillBtn").onclick = async () => {
     if (!boardLink) return;
     const text = skillPrompt(boardLink), btn = $("skillBtn");
-    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; setTimeout(() => btn.textContent = "Copy skill setup", 1600); $("skillBox").hidden = true; }
+    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; setTimeout(() => btn.textContent = "copy the skill setup", 1600); $("skillBox").hidden = true; }
     catch (e) { $("skillText").textContent = text; $("skillBox").hidden = false; }
   };
 
