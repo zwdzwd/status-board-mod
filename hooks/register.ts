@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.13'
+const VERSION = '0.9.14'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -753,6 +753,13 @@ export const register: Register = on => {
   let toolDepth = 0, toolTimer: { cancel: () => void } | null = null, toolShown = false
   on('tool.call', async ($, e, next) => {
     const name = String(e.tool || '')
+    // The model's own call of the thread listing: keep its result for the next status write.
+    if (e.agentId === undefined && LIST.test(name)) {
+      const r = await next(e)
+      const list = readListing(r as unknown as ToolResult)
+      if (list) { seenList = { list, paged: partial }; trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`) }
+      return r
+    }
     if (e.agentId !== undefined || !found || !/bash|shell|device|computer|remote|browser|ssh|slurm/i.test(name)) return next(e)
     toolDepth++
     if (toolDepth === 1) {
@@ -769,16 +776,6 @@ export const register: Register = on => {
         if (toolShown && turnActive) { toolShown = false; void setStatus($, 'thinking', RESTORE) }
       }
     }
-  })
-
-  // The model's own call of the thread listing: keep its result for the next status write.
-  on('tool.call', async ($, e, next) => {
-    const r = await next(e)
-    if (e.agentId === undefined && LIST.test(String(e.tool || ''))) {
-      const list = readListing(r as ToolResult)
-      if (list) { seenList = { list, paged: partial }; trace($, `model's listing: ${list.length} threads, ${list.filter(p => p.open).length} open${partial ? ', more pages' : ''}`) }
-    }
-    return r
   })
 
   // Main-loop turns only.
