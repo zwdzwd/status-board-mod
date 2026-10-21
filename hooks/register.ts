@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.9.18'
+const VERSION = '0.9.19'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -59,6 +59,11 @@ let lastSync = ''                        // the last thread-list sync's outcome
 // Where the mod cannot call the listing itself, the model calls it once a turn; its result waits here
 // and is applied with the next status write.
 let seenList: { list: ProjThread[]; paged: boolean } | null = null
+// In auto mode a write to an artifact needs the session's approval, which only the model's own write
+// can earn; it then covers the mod's writes for the rest of the session. Until a write has gone
+// through, the note asks the model for one small write: this chat's index record.
+let granted = false
+let indexVersion: number | null = null   // sessions/<id>'s version, for the write the note asks for
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -186,6 +191,7 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
     throw new Error(text)
   }
   lastError = ''
+  if (args.action !== 'get' && args.action !== 'list' && args.action !== 'query') granted = true
   return String(r.text ?? '')
 }
 const isConflict = (err: unknown) => /version/i.test(msg(err))
@@ -568,6 +574,7 @@ async function init($: Engine): Promise<void> {
     if (found) {
       registeredHere = found.label === PLACEHOLDER
       if (!viaIndex) void indexWrite($, found)
+      try { const d = await getDoc($, 'sessions', sessionId); indexVersion = d ? d.version : null } catch {}
       void setStatus($, turnActive ? 'thinking' : 'idle', undefined, false)
       say($, `board: ${found.name} / ${found.label}`)
       if (listTool) void syncThreads($)
@@ -592,7 +599,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  prevJob = undefined; toolJob = ''; lastSync = ''
+  prevJob = undefined; toolJob = ''; lastSync = ''; granted = false; indexVersion = null
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -634,7 +641,7 @@ function noteBody(count: boolean, v: string): string {
   if (coordinator && !coordinator.cardId) return `${v}: this is a project conversation, but no card on the Status Board matches this project.${tell(count)} Find or create the project's card by the board's rules (meta/instruction, field rules), then write sessions/${sessionId} = {card: <card id>, role: "coordinator"} (pin it to the record's version). Add no thread entry for yourself.${IN_PLACE}`
   if (coordinator) return `${v}: this is the project conversation for the ${coordinator.name} card (id ${coordinator.cardId}). The project's threads keep the card's thread list in step with the open threads at the end of each of their turns, and the mod does the same here. Add no entry for yourself.${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat's entry on the ${found.name} card (id ${found.cardId}; transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}) still has the placeholder label "${PLACEHOLDER}". Before other work, read the board's rules (meta/instruction, field rules) and fix that entry: label = this thread's name (a 1–3 word name for its work if you do not know it), url = this thread's link if you know it; keep transcript and session as they are and touch nothing else. The mod writes this chat's status by itself.`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}.${listTool ? '' : ' Once in every turn, before your final reply, call the project\'s thread-listing tool (list_thread_sessions or list_threads) with no arguments; the mod reads its result and keeps the card\'s thread list in step with the project\'s open threads. Do not edit the thread list yourself.'} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}).${granted ? '' : ` Board writes in this session need one approval that only your own write can earn: before other work, call ArtifactData with action "set", collection "sessions", doc_id "${sessionId}", data {"card": "${found.cardId}", "label": ${JSON.stringify(found.label)}}${indexVersion !== null ? `, if_version ${indexVersion}` : ''} (on a version mismatch, read that record and write again with its version). Once it is approved, the mod's own status writes go through.`} The mod writes its status (thinking / working / waiting_on_you / idle) and job line by itself${listTool ? ', and keeps the card\'s thread list in step with the project\'s open threads' : ''}.${listTool ? '' : ' Once in every turn, before your final reply, call the project\'s thread-listing tool (list_thread_sessions or list_threads) with no arguments; the mod reads its result and keeps the card\'s thread list in step with the project\'s open threads. Do not edit the thread list yourself.'} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId || (!told && reportedText)) return `${v}: this chat is not on the Status Board.${told}`
@@ -760,6 +767,13 @@ export const register: Register = on => {
   let toolDepth = 0, toolTimer: { cancel: () => void } | null = null, toolShown = false
   on('tool.call', async ($, e, next) => {
     const name = String(e.tool || '')
+    // The model's own board write earns the session's approval for the mod's writes too.
+    if (e.agentId === undefined && name === 'ArtifactData') {
+      const r = await next(e) as unknown as ToolResult
+      const a = String(((e as any).input?.action ?? (e as any).action) || '')
+      if (r && !r.isError && r.deny === undefined && a && !['get', 'list', 'query', 'profiles'].includes(a)) { granted = true; trace($, `model's board write (${a}): mod writes approved for this session`) }
+      return r as any
+    }
     // The model's own call of the thread listing: keep its result for the next status write.
     if (e.agentId === undefined && LIST.test(name)) {
       const r = await next(e)

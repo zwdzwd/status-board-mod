@@ -178,6 +178,15 @@ console.log('M5. a thread keeps its card\'s thread list in step with the project
   ok(E.db.projects.methscope.threads.map(t => t.label).join(',') === 'Mac,Analysis', 'synced: ' + E.db.projects.methscope.threads.map(t => t.label).join(','))
   ok(E.writes.filter(w => w.c === 'projects').length - E.writes.slice(0, before).filter(w => w.c === 'projects').length === 1, 'one card write for status and list together')
   ok(E.entry('methscope').status === 'idle', 'own status written')
+  console.log('M5d. until a board write goes through, the note asks the model for one; the model\'s write approves the session')
+  E = await env({ db: card([{ ...threads[0], label: 'Mac' }]), tools: ['ArtifactData'] })
+  E.state.denyWrites = true
+  await E.fire('session.start', {}); await settle()
+  let n5 = await E.note()
+  ok(/before other work, call ArtifactData with action "set", collection "sessions"/.test(n5), 'note asks for the approving write')
+  E.state.denyWrites = false
+  await E.fire('tool.call', { tool: 'ArtifactData', action: 'set', collection: 'sessions' }, { text: 'Database set committed.' })
+  ok(!/before other work, call ArtifactData/.test(await E.note()), 'no longer asked once the model wrote')
   console.log('M6. a listing with more pages removes nothing')
   E = await env({ db: card(threads), tools: ['ArtifactData', 'mcp__hb__list_thread_sessions'], listing: { ...listing, next_cursor: 'abc' } })
   await E.fire('session.start', {}); await settle()

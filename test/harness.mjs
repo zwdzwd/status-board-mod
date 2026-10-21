@@ -19,6 +19,7 @@ export function makeEnv(opts) {
     const c = a.collection, id = a.doc_id, key = c + '/' + id
     if (a.action === 'get') { if (!doc(c, id)) return { isError: true, text: `No document "${id}" in collection "${c}".` }; return { text: '=== BEGIN ===\n' + fmt(c, id) + '\n=== END ===' } }
     if (a.action === 'list') return { text: '=== BEGIN ===\n' + Object.keys(db[c] || {}).map(i => fmt(c, i)).join('\n') + '\n=== END ===' }
+    if ((a.action === 'set' || a.action === 'update') && state.denyWrites) return { deny: 'The server-side auto mode classifier gave no verdict for ArtifactData' }
     if (a.action === 'set' || a.action === 'update') {
       const exists = !!doc(c, id)
       if (exists && a.if_version !== (ver[key] || 1)) return { isError: true, text: `Write refused: document is at version ${ver[key] || 1}` }
