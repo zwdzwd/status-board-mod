@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.11.0
+# Status Board rules (meta/instruction) — v0.11.1
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -35,8 +35,10 @@ does the per-turn bookkeeping by itself:
   - it finds this session's entry through the index record
     sessions/<session UUID>; failing that, by the entry carrying the
     UUID; failing that, it registers a new entry (label "New thread",
-    transcript = the UUID) on the card whose repo or name matches this
-    repository. On your first turn, fix that entry's label (the
+    transcript = the UUID) on the card that holds the project's other
+    threads, as the project's thread list shows them. A repository or
+    folder match alone never places a thread, since several projects
+    share one (writing, labjournal). On your first turn, fix that entry's label (the
     thread's name as the project's thread list shows it) and url (this
     thread's link), touching nothing else. When the mod says it could
     not match a card (a folder shared by several projects, such as the

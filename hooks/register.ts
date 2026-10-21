@@ -6,7 +6,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // card lists its chats under "threads". An entry names its chat by "session" (the remote session id,
 // cse_… / session_…, which the project's own tools use) and "transcript" (this process's session id).
 
-const VERSION = '0.11.0'
+const VERSION = '0.11.1'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -291,17 +291,22 @@ async function guessCard($: Engine, docs: Card[]): Promise<Card | null> {
 // The card a new thread registers on. Where the session can list its project's threads, the card
 // holding one of them is the project's. A card matched only by repository or name is then refused
 // when it lists threads the listing does not know: another project working in the same repository.
+// Without a listing the thread is not placed at all: several projects can share a repository or
+// folder (writing, labjournal), so a guess from those would file it on another project's card.
 async function threadCard($: Engine, docs: Card[], given?: ProjThread[]): Promise<Card | null> {
   const list = given ?? (listTool ? await projectThreads($) : null)
-  if (list) {
-    const own = docs.find(c => threadsOf(c).some(t => t && list.some(p => matchesThread(p, t))))
-    if (own) return own
-  }
+  if (!list) return null
+  const own = docs.find(c => threadsOf(c).some(t => t && !mine(t) && list.some(p => matchesThread(p, t))))
+  if (own) return own
   const c = await guessCard($, docs)
-  if (!c || !list || !threadsOf(c).some(t => t && (threadIdOf(t) || t.session))) return c
+  if (!c || belongsTo(c, list)) return c
   skipped = nameOf(c)
   return null
 }
+// A card's entries other than this chat's that name a thread (by url or session).
+const othersOn = (c: Card) => threadsOf(c).filter(t => t && !mine(t) && (threadIdOf(t) || t.session))
+// The card holds threads of the project the listing is from, or none at all.
+const belongsTo = (c: Card, list: ProjThread[]) => { const o = othersOn(c); return !o.length || o.some(t => list.some(p => matchesThread(p, t))) }
 
 // Add this session as a thread of a card. The label and url are unknown to the mod; the thread's
 // own Claude fills them in (the note asks for that until it is done).
@@ -361,6 +366,16 @@ function setStatus($: Engine, status: string, job?: string, ended?: boolean, wai
         if (ended === false) delete n.ended
         return n
       })
+      if (seen && !belongsTo(card, seen.list)) {
+        // This chat sits on another project's card (an old repository guess): leave that card's
+        // list alone, take this chat's entry off it, and let the listing place it again.
+        th = th.filter(t => !isMine(t, ids))
+        try { await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } }) } catch {}
+        if (found === f) { found = null; registeredHere = false }
+        trace($, `left the ${f.name} card: it holds another project's threads`)
+        if (seenList === seen) void placeFrom($, seen.list)
+        return
+      }
       if (seen && seen.list.some(p => p.open)) th = syncedThreads(th, seen.list, seen.paged)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
@@ -507,6 +522,7 @@ async function syncThreadList($: Engine, cardId: string): Promise<string> {
     const card = await getCard($, cardId)
     if (!card) return 'card not found'
     const before = threadsOf(card)
+    if (!coordinator && !belongsTo(card, list)) return 'card holds another project\'s threads; not synced'
     const kept = syncedThreads(before, list, partial)
     if (JSON.stringify(kept) === JSON.stringify(before)) return 'in sync'
     try {
@@ -550,6 +566,17 @@ function syncThreads($: Engine): Promise<void> {
   const f = found
   if (!f) return Promise.resolve()
   return enqueue($, 'thread list sync', async () => { say($, `board: ${f.name} threads: ${await syncThreadList($, f.cardId)}`) })
+}
+
+// Register this chat from a project listing: on the card holding its project's other threads.
+function placeFrom($: Engine, list: ProjThread[]): Promise<void> {
+  return enqueue($, 'registration', async () => {
+    if (found) return
+    const c = await threadCard($, await cards($), list)
+    if (!c) return
+    found = await registerThread($, c)
+    if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found); trace($, `registered on ${found.name} from the project's thread list`) }
+  })
 }
 
 // The unread notes addressed to a card, as "from: subject".
@@ -766,6 +793,9 @@ export const register: Register = on => {
     const traits = e.traits || []
     // A one-shot run (-p) gets no note; a Remote Control thread also runs as print, but has a remote id.
     if (!sessionId || traits.includes('teammate') || (traits.includes('print') && !found && !remoteId)) return r
+    // The note may be composed once for the whole session: give the lookup a few seconds first, so
+    // it says what this chat needs rather than "looking up".
+    if (!initDone) { try { await limit($, initPromise, 4000, 'lookup') } catch {} }
     const text = boardNote(!traits.includes('analysis'))
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })
@@ -792,13 +822,7 @@ export const register: Register = on => {
         seenList = { list, paged: partial }
         // A new thread the mod could not place at start: the listing names its project's threads,
         // so the card holding one of them is its card.
-        if (!found && !removed && remoteId && initDone && !noBoard) void enqueue($, 'registration', async () => {
-          if (found) return
-          const c = await threadCard($, await cards($), list)
-          if (!c) return
-          found = await registerThread($, c)
-          if (found) { registeredHere = found.label === PLACEHOLDER; report = ''; void indexWrite($, found) }
-        })
+        if (!found && !removed && remoteId && initDone && !noBoard) void placeFrom($, list)
       }
       return r
     }

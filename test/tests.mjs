@@ -5,10 +5,11 @@ const ok = (cond, msg) => { if (cond) pass++; else { fail++; console.log('  FAIL
 const card = (threads = []) => ({ projects: { methscope: { name: 'MethScope', repo: 'zhou-lab/MethScope', threads } } })
 async function env(opts) { const register = await load(); const E = makeEnv(opts); register(E.on); return E }
 
-console.log('A. new thread registers on the card matched by repo; first-turn note waits for the lookup')
-{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_X', url: 'u' }]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', name: 'MethScope', root: '/w/MethScope' } })
+console.log('A. new thread with a listing registers on the card holding its project\'s threads; the note waits for the lookup')
+{ const listing = { sessions: [{ session_id: 'cse_01REMOTEaaaaaaaaaaaaaaaa', thread_id: 'cmsg_ME', title: 'New thread', status: 'active' }, { session_id: 'cse_X', thread_id: 'cmsg_X', title: 'Writing', status: 'active' }] }
+  const E = await env({ db: card([{ label: 'Writing', session: 'cse_X', url: 'u' }]), tools: ['ArtifactData', 'mcp__hb__list_threads'], listing, repo: { remote: 'git@github.com:zhou-lab/MethScope.git', name: 'MethScope', root: '/w/MethScope' } })
   await E.fire('session.start', {})
-  ok(/looking up/.test(await E.note()), 'note before lookup is neutral')
+  ok(!/looking up/.test(await E.note()), 'note composed after the lookup')
   await settle()
   const t = E.entry('methscope'); ok(t && t.label === 'New thread', 'entry added with placeholder')
   ok(E.db.projects.methscope.threads.length === 2, 'other entry kept')
@@ -16,7 +17,7 @@ console.log('A. new thread registers on the card matched by repo; first-turn not
   ok(E.db.sessions[E.state.id]?.card === 'methscope', 'index written')
   await E.fire('turn.start', {}); await settle(); ok(E.entry('methscope').status === 'thinking', 'thinking at turn start')
   E.state.classify = 0
-  t.label = 'Revision'; // the model fixes the label (no url)
+  t.label = 'Revision'; E.state.listing.sessions[0].title = 'Revision' // the thread is named (no url)
   E.db.projects.methscope.threads = E.db.projects.methscope.threads.map(x => x.transcript === E.state.id ? { ...x, label: 'Revision' } : x)
   await E.fire('turn.complete', { answer: 'Shall I push?', reason: 'answer' }); await settle()
   ok(E.entry('methscope').status === 'waiting_on_you', 'waiting_on_you after a question')
@@ -197,9 +198,26 @@ console.log('N1. an entry written by the coordinator (session id, no transcript)
   ok(/thread "Writing"/.test(await E.note()), 'note names the thread') }
 
 console.log('N1b. a registered entry carries the remote session id, so a coordinator sync keeps it')
-{ const E = await env({ db: card([]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
+{ const E = await env({ db: card([]), tools: ['ArtifactData', 'mcp__hb__list_threads'], listing: { sessions: [{ session_id: R, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }] }, repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
   await E.fire('session.start', {}); await settle()
   ok(E.entry('methscope')?.session === R, 'session = remote id') }
+
+console.log('N1c. without any listing, a repository match alone places nothing (shared repositories)')
+{ const E = await env({ db: card([]), repo: { remote: 'git@github.com:zhou-lab/MethScope.git', root: '/w/MethScope' } })
+  await E.fire('session.start', {}); await settle()
+  ok(!E.db.projects.methscope.threads.length, 'not registered on a repo guess') }
+
+console.log('N1d. a thread misfiled on another project\'s card leaves it untouched and moves to its own card')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa', U = 'https://claude.ai/code/project/chan_1?thread='
+  const E = await env({ db: { projects: {
+      brain: { name: 'BrainRegion', repo: 'zhou-lab/labjournal', threads: [{ label: 'Brain A', session: 'cse_B1', url: 'https://claude.ai/code/project/chan_2?thread=cmsg_B1' }, { label: 'New thread', session: RID, transcript: 'aaaaaaaa-1111-2222-3333-444444444444' }] },
+      adapt: { name: 'AdaptSampling', threads: [{ label: 'Writing', url: U + 'cmsg_W' }] } } } })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_A', title: 'Analysis', status: 'active' }, { session_id: 'cse_W', thread_id: 'cmsg_W', title: 'Writing', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'done', reason: 'answer' }); await settle(); await settle()
+  ok(E.db.projects.brain.threads.map(t => t.label).join(',') === 'Brain A', 'BrainRegion keeps only its own thread: ' + E.db.projects.brain.threads.map(t => t.label).join(','))
+  ok(E.db.projects.adapt.threads.some(t => t.session === RID), 'moved to AdaptSampling') }
 
 console.log('N2. a tool error mentioning ArtifactData does not switch the mod off; only a missing tool does')
 { const E = await env({ db: card([{ label: 'HPC', session: R }]) })
