@@ -8,8 +8,8 @@ Five parts, one version number (`VERSION`; the same string is in
 - **The plugin** (`.claude-plugin/`, `hooks/register.ts`): a Claude Code plugin. In a
   thread it writes the thread's status (thinking / waiting on you / idle) at the start and end
   of every turn, the thread's running background jobs (the board lights "working"), and its
-  to-do checklist (from the thread's progress checklist, written with the turn's status writes),
-  which the board shows per thread and the terminal and desktop app pin above the prompt. It
+  "waiting on you" list, read from the "Waiting on you:" line the thread ends each message with
+  (see the board-status skill), which you can tick off on the board. It
   places a new thread on the card that holds its project's other threads, by the project's
   thread listing; a thread it cannot place shows on the board as "not on any card", never on a
   guessed card. The card's thread list is synced only by `/board-status`. A project
@@ -110,7 +110,7 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
 
 - Card = one document in `projects/<id>` on the board: name, repo, category, status,
   summary, next, blocker, threads[], updated.
-- Thread entry = `{label, url, session, transcript, status, at, jobs, todo?, waiting?, ended?}`:
+- Thread entry = `{label, url, session, transcript, status, at, jobs, asks?, waiting?, ended?}`:
   `session` is the remote session id (`cse_…`) the project's tools use, `transcript` the CLI
   session id. The thread's own session writes its status and jobs; `/board-status` in any
   thread makes the list match the project's open threads. Resolve threads rather than delete
@@ -118,4 +118,4 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
 - Other collections: `sessions/<uuid>` (the plugin's index: which card and thread a session is),
   `unmatched/<uuid>` (threads the plugin could not place, shown on the board), `checkins/<thread
   id>` (the `/board-status` write that, in auto mode, lets the plugin write for the session),
-  `messages` (notes between projects) and `meta/instruction` (the rules).
+  `ticks/<ask id>` (items you ticked on the board), `messages` (notes between projects) and `meta/instruction` (the rules).

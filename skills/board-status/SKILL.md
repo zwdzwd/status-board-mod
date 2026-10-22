@@ -28,3 +28,17 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
    summary, the next step, and its threads with their status. The thread list is synced at the end
    of this turn, so say that it will match then. If no card holds this project's threads, say so;
    the board lists this thread under "not on any card".
+
+## Every turn after this: "Waiting on you"
+
+End each message you send the user with one line saying what waits on them, in the same words the
+board will show. The Status Board mod reads it and keeps it as this thread's "waiting on you" list.
+
+- One item: `Waiting on you: Pick the Fig 2 layout`
+- Several: `Waiting on you: Pick the Fig 2 layout; Approve the push`, or that heading followed by
+  bullet lines.
+- Nothing: `Waiting on you: nothing`. This clears the list.
+
+Write each item as a bare imperative under 12 words, with no name, no "you", and no "please". An
+item you no longer list is closed. The user can also tick an item off on the board, and it then
+drops off; do not list it again unless it is still needed.

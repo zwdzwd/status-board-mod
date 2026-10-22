@@ -6,11 +6,12 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // under "threads". An entry names its chat by "session" (the remote session id, cse_… / session_…,
 // which the project's own tools use) and "transcript" (this process's session id). The card's thread
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
-// call then places it and makes the list match the project's open threads. The thread's progress
-// checklist goes on the entry as "todo" with the turn's status writes (no writes of its own), and is
-// drawn above the prompt where the surface has that band (the terminal, the desktop app).
+// call then places it and makes the list match the project's open threads. What the thread waits on
+// the user for is the "Waiting on you" line the thread writes in its message each turn: the mod reads
+// it and keeps it as the entry's "asks" list, written with the turn's status writes; the user can
+// tick an item off on the board (collection "ticks").
 
-const VERSION = '0.13.0'
+const VERSION = '0.14.0'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -27,9 +28,10 @@ const LIST = /(^|__)(list_threads|list_thread_sessions)$/
 const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
 type Job = { text: string; type: string; id: string }
-type TodoItem = { mark: 'done' | 'doing' | 'todo'; text: string }
-type Todo = { title: string; items: TodoItem[]; at: string }
-type Thread = { jobs?: Job[]; todo?: Todo; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
+// One thing a thread waits on the user for. done_at is set when the thread ticks it, or when the
+// user ticks it on the board (a ticks/<id> document the plugin folds in at its next write).
+type Ask = { id: string; text: string; at: string; done_at?: string }
+type Thread = { jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
@@ -66,9 +68,10 @@ let unread: string[] = []
 // hooks: the thread's "jobs" on the card. null until a report has come.
 let jobsNow: Job[] | null = null
 let jobsWritten = ''
-// The thread's to-do checklist, from its last progress checklist: the entry's "todo", written with
-// the next status write (turn start or end), never on its own.
-let todoNow: Todo | null = null
+// The "Waiting on you" items the thread wrote this turn, for the next status write; null when this
+// turn's message had no such line (the list then stays as it was).
+let asksSaid: string[] | null = null
+let replyText = ''                       // the turn's last message to the user through a reply tool
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -348,15 +351,22 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
       }
       const at = now()
       const seen = seenList
+      const mineNow = threadsOf(card).find(t => isMine(t, ids))
+      const ticked = await ticksFor($, mineNow ? mineNow.asks : undefined)
       let th = threadsOf(card).map(t => {
         if (!isMine(t, ids)) return t
         const n: Thread = { ...t }
         if (status) { n.status = status; n.at = at; if (status !== 'waiting_on_you') delete n.waiting }
         if (waiting && status === 'waiting_on_you') n.waiting = waiting
+        // A thread that keeps a list says on the board what it says in the thread: its newest open item.
+        const list = asksSaid !== null || n.asks ? mergedAsks(n.asks, ticked) : undefined
+        const openNow = (list || []).filter(a => !a.done_at)
+        if (status === 'waiting_on_you' && openNow.length) n.waiting = openNow[0]!.text
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
         if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
-        if (todoNow) n.todo = todoNow
+        if (list) n.asks = list
+        delete n.todo                                               // the 0.13 progress checklist, retired
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
         return n
@@ -381,6 +391,7 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
       try {
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
         if (seen && seenList === seen) seenList = null
+        asksSaid = null
         if (status) lastWrite = status
         if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
         say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}${seen ? ' (thread list synced)' : ''}`)
@@ -628,6 +639,53 @@ async function checkMail($: Engine, cardId: string): Promise<void> {
 }
 const mailNote = (f: Found) => unread.length ? ` The ${f.name} project has ${unread.length} unread note${unread.length === 1 ? '' : 's'} on the Status Board (${unread.slice(0, 3).join('; ')}${unread.length > 3 ? '; …' : ''}). Load the status-board-messaging skill to read ${unread.length === 1 ? 'it' : 'them'} and tell the user what ${unread.length === 1 ? 'it asks' : 'they ask'}.` : ''
 
+// ---- What the thread waits on the user for ----
+// The board's ticks for this entry's open items: ticks/<ask id> documents the user writes there.
+async function ticksFor($: Engine, asks: Ask[] | undefined): Promise<Map<string, string>> {
+  const open = (Array.isArray(asks) ? asks : []).filter(a => a && !a.done_at).map(a => a.id).filter(Boolean)
+  const out = new Map<string, string>()
+  for (let i = 0; i < open.length; i += 10) {
+    try { for (const d of parseDocs(await call($, { action: 'query', collection: 'ticks', query: { where: [['ask', 'in', open.slice(i, i + 10)]] } }))) out.set(String(d.data.ask), String(d.data.at || now())) } catch {}
+  }
+  return out
+}
+// The entry's list as the thread last said it: items it wrote stay (keeping their id and time), new ones
+// are added, ones it no longer lists are closed; an item ticked on the board is closed too. Items
+// closed more than a day ago are dropped.
+function mergedAsks(cur: Ask[] | undefined, ticked: Map<string, string>): Ask[] {
+  const at = now()
+  const list = (Array.isArray(cur) ? cur : []).filter(a => a && a.id && a.text).map(a => ({ ...a }))
+  if (asksSaid !== null) {
+    const said = asksSaid.map(t => t.toLowerCase())
+    for (const a of list) if (!a.done_at && !said.includes(a.text.toLowerCase())) a.done_at = at
+    asksSaid.forEach((text, k) => { if (!list.some(x => !x.done_at && x.text.toLowerCase() === text.toLowerCase()))
+      list.push({ id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }) })
+  }
+  for (const a of list) if (!a.done_at && ticked.has(a.id)) a.done_at = ticked.get(a.id)
+  return list.filter(a => !a.done_at || Date.now() - Date.parse(a.done_at) < 24 * 3600000).slice(-30)
+}
+// The "Waiting on you" line in a message: "Waiting on you: X" (several items split by ";"), or that
+// heading followed by bullet lines. "Waiting on you: nothing" (or none) clears the list. null when
+// the message has no such line.
+function waitingSaid(text: string): string[] | null {
+  const lines = String(text || '').split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = /^\s*(?:[#>*_\s-]*)waiting on you\b[*_]*\s*[:：]?[*_]*\s*(.*)$/i.exec(lines[i] || '')
+    if (!m) continue
+    const items: string[] = []
+    const rest = (m[1] || '').replace(/^[*_\s]+|[*_\s]+$/g, '')
+    if (rest) items.push(...rest.split(/;\s*/))
+    for (let k = i + 1; k < lines.length; k++) {
+      const b = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(lines[k] || '')
+      if (!b) { if ((lines[k] || '').trim()) break; if (items.length) break; continue }
+      items.push(b[1] || '')
+    }
+    const clean = items.map(lean).filter(Boolean)
+    return clean.length === 1 && /^(nothing|none|no(thing)? (is )?waiting)\b/i.test(clean[0]!) ? [] : clean.slice(0, 12)
+  }
+  return null
+}
+
 // ---- Startup ----
 // Runs in the background: it must never hold up the session.
 async function init($: Engine): Promise<void> {
@@ -670,7 +728,7 @@ function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
   unread = []; unmatchedWhy = ''; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
-  jobsNow = null; threadId = ''; priorIds = []; todoNow = null
+  jobsNow = null; threadId = ''; priorIds = []; asksSaid = null
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -709,7 +767,7 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // /board-status runs the board-status skill: the thread's check-in write and its listing call.
-const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it.'
+const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with one line "Waiting on you: <items, ; separated>" (or "Waiting on you: nothing"), as bare imperatives without the user\'s name; the mod puts that list on the board.'
 function noteBody(count: boolean, v: string): string {
   const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. ${sync}${IN_PLACE}`
@@ -758,6 +816,14 @@ function lastQuestion(answer: string): string {
   const qs = answer.replace(/`[^`]*`/g, '').match(/[^.!?\n]{3,}\?/g)
   return qs ? oneLine(qs[qs.length - 1]) : ''
 }
+// A waiting line is about the user already: no "Wanding:", "the user should", "waiting on you" lead-in.
+const LEAD = /^\s*(?:waiting on (?:you|wanding|the user)\s*(?:for|to|:|,|-)?\s*|(?:wanding|the user|user|you)\s*(?:needs? to|should|must|to|:|,|-)\s*)/i
+function lean(s: string): string {
+  let t = oneLine(s)
+  for (let i = 0; i < 2 && LEAD.test(t); i++) t = t.replace(LEAD, '')
+  if (/^(in|on|at)\b/i.test(t)) t = 'Reply ' + t                  // "Waiting on Wanding in Writing" -> "Reply in Writing"
+  return t ? t[0].toUpperCase() + t.slice(1) : t
+}
 function oneLine(s: string): string {
   const t = s.replace(/\s+/g, ' ').replace(/^["'*\s-]+|["'*\s]+$/g, '').trim()
   return t.length > 110 ? t.slice(0, 109).trimEnd() + '…' : t
@@ -767,12 +833,12 @@ async function askedFor($: Engine, answer: string): Promise<string> {
     const r = await limit($, $.model.complete({
       model: 'haiku',
       maxTokens: 60,
-      prompt: `Below is an assistant's last message to a user. In at most 12 words, say what the user needs to do or decide next, as an imperative (for example "Push the repo and restart Claude in MethScope" or "Choose between the two figure layouts"). If the message asks nothing of the user, reply NONE. Reply with that line only.\n\n<message>\n${answer.slice(-4000)}\n</message>`,
+      prompt: `Below is an assistant's last message to a user. In at most 10 words, say what the user needs to do or decide next, as a bare imperative with no name or "you" (for example "Push the repo and restart Claude in MethScope" or "Choose between the two figure layouts"). If the message asks nothing of the user, reply NONE. Reply with that line only.\n\n<message>\n${answer.slice(-4000)}\n</message>`,
     }), 15000, 'summary')
-    if (r.isAnswered && r.text && r.text.trim()) { const t = oneLine(r.text); return /^none\b/i.test(t) ? '' : t }
+    if (r.isAnswered && r.text && r.text.trim()) { const t = lean(r.text); return /^none\b/i.test(t) ? '' : t }
   } catch {}
   // No summary: the last question, or else the message's last sentence, so the card always says what.
-  return lastQuestion(answer) || oneLine((answer.replace(/`[^`]*`/g, '').match(/[^.!?\n]{3,}[.!?]?/g) || ['']).pop() || '')
+  return lean(lastQuestion(answer) || (answer.replace(/`[^`]*`/g, '').match(/[^.!?\n]{3,}[.!?]?/g) || ['']).pop() || '')
 }
 
 // A background command shown on the shared board (a job with no description): the program and up to
@@ -786,24 +852,6 @@ function jobText(tool: string, command: unknown): string {
   }
   return (tool.replace(/^mcp__/, '') + (shown.length ? ': ' + shown.join(' ') : '')).slice(0, 60)
 }
-
-// ---- The to-do checklist ----
-// A project thread's progress checklist (update_status): a header line, then one step per line marked
-// ✓ done, ✱ in progress or ○ not started; ** bolds the step just done.
-const STATUS_TOOL = /(^|__)update_status$/
-const MARKS: Record<string, TodoItem['mark']> = { '✓': 'done', '✔': 'done', '✱': 'doing', '○': 'todo' }
-function todoFromStatus(text: unknown): Todo | null {
-  const lines = String(text ?? '').split('\n').map(l => l.replace(/\*\*/g, '').trim()).filter(Boolean)
-  const items: TodoItem[] = []
-  for (const l of lines) {
-    const m = /^([✓✔✱○])\s*(.+)$/.exec(l)
-    if (m && m[1] && m[2]) items.push({ mark: MARKS[m[1]] ?? 'todo', text: oneLine(m[2]) })
-  }
-  if (!items.length) return null
-  const head = lines[0] && !/^[✓✔✱○]/.test(lines[0]) ? oneLine(lines[0]) : 'To-do'
-  return { title: head, items: items.slice(0, 30), at: now() }
-}
-const TICK: Record<TodoItem['mark'], string> = { done: '✓', doing: '✱', todo: '○' }
 
 export const register: Register = on => {
   // The mod's own calls need no permission dialog: its reads and writes of this board, the thread
@@ -863,13 +911,12 @@ export const register: Register = on => {
   // at once to place a chat that is not on a card yet.
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool || '')
-    if (e.agentId === undefined && STATUS_TOOL.test(tool)) {
-      // The thread's checklist: kept for the band and for the next status write, once the call went through.
-      const r = await next(e)
-      const done = r as unknown as ToolResult
-      const t = done.deny === undefined && !done.isError ? todoFromStatus((e as unknown as Record<string, unknown>).text) : null
-      if (t) { todoNow = t; try { $.ui.invalidate('ui.render') } catch {} }
-      return r
+    // A message the thread sends the user (a project thread's reply tool): its "Waiting on you" line.
+    if (e.agentId === undefined && /(^|__)reply$/.test(tool)) {
+      replyText = String((e as unknown as Record<string, unknown>).text ?? '')
+      const said = waitingSaid(replyText)
+      if (said) asksSaid = said
+      return next(e)
     }
     if (e.agentId !== undefined || !LIST.test(tool)) return next(e)
     const r = await next(e)
@@ -879,19 +926,6 @@ export const register: Register = on => {
       if (!found && remoteId && initDone && !noBoard) void placeFrom($, l.list)
     }
     return r
-  })
-
-  // The to-do checklist above the prompt, on the surfaces that have that band.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const t = todoNow
-    if (!t || e.props.hasSurvey) return next(e)
-    const { Box, Text } = $.ui.resolve(e) as any
-    const done = t.items.filter(x => x.mark === 'done').length
-    const room = Math.max(1, Math.min(e.props.maxRows, 12) - 1)
-    const rows = t.items.length > room ? t.items.filter(x => x.mark !== 'done').slice(0, room) : t.items
-    return h(Box, { flexDirection: 'column' },
-      h(Text, { bold: true }, `${t.title} (${done}/${t.items.length})`),
-      ...rows.map(x => h(Text, { dimColor: x.mark === 'done', bold: x.mark === 'doing' }, `${TICK[x.mark]} ${x.text}`)))
   })
 
   // What still runs when the main loop stops: the thread's jobs list, written when it changes.
@@ -926,7 +960,10 @@ export const register: Register = on => {
     composedReport = ''
     if (!sessionId) return out
     const seq = turnSeq
-    const answer = String(e.answer || '')
+    // What the user read this turn: a project thread's reply when it sent one, else the final answer.
+    const answer = replyText || String(e.answer || '')
+    replyText = ''
+    { const said = waitingSaid(String(e.answer || '')); if (said) asksSaid = said }
     // The rest runs in the background so the turn ends at once; a newer turn's status wins.
     void (async () => {
       try {
@@ -944,7 +981,9 @@ export const register: Register = on => {
         }
         if (seq !== turnSeq) return
         if (!found) { await markUnmatched($); return }
-        const d = reason === 'answer' ? await decide($, answer) : { status: 'idle' }
+        let d: { status: string; waiting?: string } = reason === 'answer' ? await decide($, answer) : { status: 'idle' }
+        // A turn that lists what waits on the user is waiting on the user, whatever the classifier said.
+        if (asksSaid && asksSaid.length) d = { status: 'waiting_on_you', waiting: asksSaid[0] }
         if (seq !== turnSeq) return
         await setStatus($, d.status, undefined, d.waiting)
         if (found) await checkMail($, found.cardId)

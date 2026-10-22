@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.13.0
+# Status Board rules (meta/instruction) — v0.14.0
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -60,12 +60,17 @@ does the per-turn bookkeeping by itself:
     workflows) as Claude Code reports it, [{text, type, id}], empty
     when nothing runs. The board lights "working" on a thread with
     jobs;
-  - it writes the thread's to-do checklist, "todo": {title, items:
-    [{mark, text}], at}, mark done, doing or todo, from the thread's
-    last progress checklist, with the turn's status writes (so the
-    board shows it as of the last turn start or end). The board shows
-    the count on the thread's button and the list in the opened card.
-    Leave it as the mod wrote it;
+  - it keeps the thread's "waiting on you" list, "asks": [{id, text,
+    at, done_at?}], from the line the thread's Claude ends each
+    message to me with: "Waiting on you: <item>; <item>" (or a
+    "Waiting on you" heading with bullets, or "Waiting on you:
+    nothing"). Items are bare imperatives without my name. An item the
+    thread no longer lists is closed. I can tick an item on the board
+    (a ticks/<id> document); the mod folds that in at its next write.
+    The list goes out with the turn's status writes. The board counts
+    open items on the thread's button, puts them first on the card,
+    and lists them as checkboxes in the opened card. Leave it as the
+    mod wrote it;
   - in auto mode the mod's board writes need one approval that only
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
@@ -99,10 +104,12 @@ it finishes.
     none. When the project is waiting on someone other than me, say so
     here, naming them: "Waiting on Hao: commit S2a and 3b".
   - blocker: only what is waiting on ME (a decision, a review, an
-    answer), at most 12 words, or "" if nothing is. The board shows it
+    answer), at most 12 words, or "" if nothing is. Write it as a bare
+    imperative, without my name or "waiting on": "Pick the Fig 2
+    layout". The board shows it
     in red as "Waiting on you"; never put someone else's task here.
   - threads: [{label, url, session, transcript, status, at, jobs,
-    todo?, waiting?, ended?}], one
+    asks?, waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or
