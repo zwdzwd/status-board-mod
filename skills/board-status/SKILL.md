@@ -48,4 +48,6 @@ List only what THIS thread itself needs from the user for its own work. Never co
 other threads, from the card (its blocker or next step), or from the project as a whole, even when
 you have just read them on the board: each thread's list is shown under that thread, so a copied
 item shows twice. Write each item as a bare imperative under 12 words, with no name, no "you", and
-no "please". Once the user has addressed an item, stop listing it; it then leaves the board.
+no "please". When the user starts a turn, the mod marks the list on the board as being worked on; your message at
+the end of the turn sets it again, so list every item that still waits, and drop those the user
+has addressed.

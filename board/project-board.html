@@ -83,6 +83,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
 #tip .askhead{margin:3px 0 0;font-weight:600} #tip .askhead a{color:inherit}
 #tip .asklist{margin:0 0 2px;padding-left:18px} #tip .asklist li{margin:0}
+.inwork{opacity:.6} .inwork .wk{margin-right:4px}
 .tbtn .asksn{margin-left:3px;padding:0 5px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bad);background:var(--bad-soft)}
 .tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 @keyframes pulse{50%{opacity:.25}}
@@ -153,7 +154,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.3";
+  const VERSION = "0.14.4";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -258,6 +259,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   const LEAD = /^\s*(?:waiting on (?:you|wanding|the user)\s*(?:for|to|:|,|-)?\s*|(?:wanding|the user|user|you)\s*(?:needs? to|should|must|to|:|,|-)\s*)/i;
   const lean = x => { let t = String(x || "").trim(); for (let i = 0; i < 2 && LEAD.test(t); i++) t = t.replace(LEAD, ""); if (/^(in|on|at)\b/i.test(t)) t = "Reply " + t; return t ? t[0].toUpperCase() + t.slice(1) : t; };
   const openAsks = t => arr(t && t.asks).filter(a => a && a.id && a.text && !a.done_at);
+  // An item the thread is working on: the user started a turn and the thread is still on it.
+  const inWork = (t, a) => !!(a && a.work) && (threadState(t) || {}).key === "thinking";
+  const workMark = () => el("span",{class:"wk",title:"Being worked on",text:"\u27f3"});
   // A thread's state. "status" is the chat itself: thinking (Claude is on a turn), waiting on you, or idle.
   // Background jobs are a separate light on the thread's button; an idle chat with jobs counts as working.
   // Thinking beats working, since a thinking thread can take something else only once it is done.
@@ -298,9 +302,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const txt = el("div",{class:"text"}); body.append(txt);
     // What waits on you comes first, since it matters most: the open items the threads keep (up to
     // three lines, then a count), else the threads' waiting lines, else the card's blocker.
-    const items = waitingItems(p).map(x => x.a.text);
-    const waits = (items.length ? items : asks(p).concat(arr(p.blocker), arr(p.blockers))).map(lean).filter(Boolean);
-    waits.slice(0, 3).forEach((x, k) => txt.append(el("p",{class:"line bad"}, el("b",{text:k ? "·" : "W",title:"Waiting on you"}), x)));
+    const items = waitingItems(p).map(x => ({text: lean(x.a.text), work: inWork(x.t, x.a)}));
+    const waits = items.length ? items.filter(x => x.text) : asks(p).concat(arr(p.blocker), arr(p.blockers)).map(lean).filter(Boolean).map(text => ({text}));
+    waits.slice(0, 3).forEach((x, k) => txt.append(el("p",{class:"line bad" + (x.work ? " inwork" : "")}, el("b",{text:k ? "·" : "W",title:"Waiting on you"}), x.work ? workMark() : null, x.text)));
     if (waits.length > 3) txt.append(el("p",{class:"line bad more"},"+ " + (waits.length - 3) + " more waiting on you"));
     // Then the summary (one line) and the next step, which always shows, None when there is none.
     if (p.summary) txt.append(el("p",{class:"line",text:p.summary}));
@@ -334,7 +338,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       groups.forEach((as, th) => {
         const name = th.label || "Thread";
         w.append(el("p",{class:"askhead"}, safe(th.url) ? el("a",{href:th.url,target:"_blank",rel:"noopener",text:name}) : name, ":"));
-        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(el("li",{text:lean(a.text)}))); w.append(ul); });
+        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(inWork(th, a) ? el("li",{class:"inwork"}, workMark(), lean(a.text)) : el("li",{text:lean(a.text)}))); w.append(ul); });
       bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));

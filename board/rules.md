@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.3
+# Status Board rules (meta/instruction) — v0.14.4
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -66,8 +66,10 @@ does the per-turn bookkeeping by itself:
     per item, each on its own line (or "Waiting on you: nothing").
     Each thread lists only what it needs from me for its own work,
     never other threads' items or the card's blocker. Items are bare imperatives without my name. Only the
-    thread changes the list: once an item is addressed it stops
-    listing it, and it is gone. The list goes out with the turn's
+    thread changes the list: when I start a turn in the thread the
+    mod marks its items as being worked on ("work": time; the board
+    dims them with ⟳ while the thread thinks), and the thread's message
+    at the end of that turn lists again whatever still waits. The list goes out with the turn's
     status writes. The board counts open items on the thread's button,
     puts them first on the card, and lists them in the opened card.
     Leave it as the mod wrote it;

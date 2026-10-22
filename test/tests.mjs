@@ -499,5 +499,19 @@ console.log('T2. a thread does not repeat items another thread on the card alrea
   await E.fire('turn.complete', { answer: 'Draft ready.\nWaiting on you:\n- Review section 2\n- approve the panel script', reason: 'answer' }); await settle()
   ok(E.entry('methscope').asks.map(x => x.text).join('|') === 'Review section 2', 'only its own item kept: ' + JSON.stringify(E.entry('methscope').asks)) }
 
+console.log('T3. a turn the user starts marks the waiting items as being worked on; the thread lists again what still waits')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle', asks: [{ id: 'x1', text: 'Pick the title', at: 't' }, { id: 'x2', text: 'Review Fig 2', at: 't' }] }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: '<task-notification>done</task-notification>' }); await settle()
+  ok(E.entry('methscope').asks.length === 2, 'a background notice leaves the list')
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  await E.fire('turn.start', { text: '<wake reason="mention"><message from="human" trust="principal">Title is fine</message></wake>' }); await settle()
+  ok(E.entry('methscope').asks.length === 2 && E.entry('methscope').asks.every(x => x.work), 'the user\'s turn marks the items as being worked on')
+  await E.fire('turn.complete', { answer: 'Title set.\nWaiting on you:\n- Review Fig 2', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').asks.map(x => x.text).join('|') === 'Review Fig 2' && !E.entry('methscope').asks[0].work, 'the end of the turn lists what still waits, no longer in work')
+  await E.fire('turn.start', { text: '<wake reason="mention"><message from="human" trust="principal">ok</message></wake>' }); await settle()
+  await E.fire('turn.complete', { answer: 'Noted.', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').asks.length === 1 && !E.entry('methscope').asks[0].work, 'a turn ending without the line unmarks the items') }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

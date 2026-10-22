@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.3'
+const VERSION = '0.14.4'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -29,7 +29,7 @@ const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_
 
 type Job = { text: string; type: string; id: string }
 // One thing a thread waits on the user for.
-type Ask = { id: string; text: string; at: string }
+type Ask = { id: string; text: string; at: string; work?: string }
 type Thread = { jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
@@ -70,6 +70,8 @@ let jobsWritten = ''
 // The "Waiting on you" items the thread wrote this turn, for the next status write; null when this
 // turn's message had no such line (the list then stays as it was).
 let asksSaid: string[] | null = null
+// A turn the user started: the thread's open items are marked as being worked on until the turn ends.
+let asksWork = false
 let replyText = ''                       // the turn's last message to the user through a reply tool
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
@@ -366,6 +368,8 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (!n.session && remote) n.session = remote
         if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
         if (list) { if (list.length) n.asks = list; else delete n.asks }
+        else if (Array.isArray(n.asks) && status === 'thinking' && asksWork) n.asks = n.asks.map(a => ({ ...a, work: at }))
+        else if (Array.isArray(n.asks) && status && status !== 'thinking') n.asks = n.asks.map(({ work: _w, ...a }) => a)
         delete n.todo                                               // the 0.13 progress checklist, retired
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
@@ -392,6 +396,7 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         await call($, { action: 'update', collection: 'projects', doc_id: f.cardId, if_version: card.version, data: { threads: th } })
         if (seen && seenList === seen) seenList = null
         asksSaid = null
+        if (status === 'thinking') asksWork = false
         if (status) lastWrite = status
         if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
         say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}${seen ? ' (thread list synced)' : ''}`)
@@ -640,7 +645,13 @@ async function checkMail($: Engine, cardId: string): Promise<void> {
 const mailNote = (f: Found) => unread.length ? ` The ${f.name} project has ${unread.length} unread note${unread.length === 1 ? '' : 's'} on the Status Board (${unread.slice(0, 3).join('; ')}${unread.length > 3 ? '; …' : ''}). Load the status-board-messaging skill to read ${unread.length === 1 ? 'it' : 'them'} and tell the user what ${unread.length === 1 ? 'it asks' : 'they ask'}.` : ''
 
 // ---- What the thread waits on the user for ----
-// ---- What the thread waits on the user for ----
+// Whether a turn's text is a person's message, not a background notice, a timer, or another session's
+// relay. A project thread receives the person's message wrapped as from="human".
+function fromUser(text: string): boolean {
+  if (/<message\b[^>]*\bfrom="human"/.test(text)) return true
+  if (!text.trim() || /<(task-notification|wake|relay|project_claude_message|cross-session-message)\b|SYSTEM NOTIFICATION/i.test(text)) return false
+  return true
+}
 // The entry's list as the thread last said it: items it still lists keep their id and time, new ones
 // are added, and ones it no longer lists are gone. Items another thread on the card already lists are
 // left out, since each thread's list shows under that thread.
@@ -715,7 +726,7 @@ function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
   unread = []; unmatchedWhy = ''; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
-  jobsNow = null; threadId = ''; priorIds = []; asksSaid = null
+  jobsNow = null; threadId = ''; priorIds = []; asksSaid = null; asksWork = false
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -933,6 +944,9 @@ export const register: Register = on => {
       turnActive = true
       await refreshSession($)
       if (initDone && initFailed > 0 && initFailed < 3 && !found && !coordinator) startInit($)   // the board failed at start: try again
+      // A turn the user started is the thread taking up what it waited on: its items are marked as being
+      // worked on now, and the thread's message at the end of the turn lists again whatever still waits.
+      if (found && initDone && fromUser(String(e.text || ''))) asksWork = true
       if (found && initDone) void setStatus($, 'thinking')
     }
     return next(e)
