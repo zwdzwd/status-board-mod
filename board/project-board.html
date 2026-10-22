@@ -154,7 +154,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.4";
+  const VERSION = "0.14.5";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -210,13 +210,22 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       const d = el("details",{class:"chain" + (c.settled ? " settled" : "")});
       d.open = !!folds[key];   // folded until the viewer opens it
       d.addEventListener("toggle", () => { folds[key] = d.open; });
-      const sum = el("summary",null, route(m, k + " note" + (k === 1 ? "" : "s") + " · " + ago(c.last) + (waiting ? " · " + waiting + " unread" : " · settled")), el("span",{class:"subj",text:m.subject || ""}));
+      // The route is the first note's; the unread count names who has yet to read, since replies go the other way.
+      const readers = [...new Set(c.notes.filter(x => !x.read_at).map(x => pname(x.to)))].join(", ");
+      const sum = el("summary",null, route(m, k + " note" + (k === 1 ? "" : "s") + " · " + ago(c.last) + (waiting ? " · " + waiting + " unread by " + readers : " · settled")), el("span",{class:"subj",text:m.subject || ""}));
+      if (waiting){ const rd = el("button",{class:"linkbtn",type:"button",title:"Mark this conversation's notes as read (you have read them here)",text:"mark read"});
+        rd.addEventListener("click", ev => { ev.preventDefault(); markRead(c); }); sum.append(" ", rd); }
       if (c.settled){ const clear = el("button",{class:"linkbtn",type:"button",title:"Hide this conversation from the board (the notes stay in the data)",text:"clear"});
         clear.addEventListener("click", ev => { ev.preventDefault(); clearChain(c); }); sum.append(" ", clear); }
       d.append(sum);
       c.notes.forEach((x, i) => { const fresh = !x.read_at;
-        d.append(el("div",{class:"note" + (i ? " reply" : "") + (fresh ? " unread" : "")}, route(x, ago(x.at) + (fresh ? " · unread" : "")), el("span",{class:"subj",text:x.subject || ""}))); });
+        d.append(el("div",{class:"note" + (i ? " reply" : "") + (fresh ? " unread" : "")}, route(x, ago(x.at) + (fresh ? " · unread by " + pname(x.to) : "")), el("span",{class:"subj",text:x.subject || ""}))); });
       box.append(d); });
+  }
+  async function markRead(c){
+    if (!dbRef) return;
+    const at = new Date().toISOString();
+    for (const m of c.notes.filter(x => !x.read_at)) { try { await dbRef.doc("messages/" + m.id).update({read_at: at}); } catch(e){} }
   }
   async function clearChain(c){
     if (!dbRef) return;
@@ -229,7 +238,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     box.hidden = !recent.length; box.replaceChildren();
     if (!recent.length) return;
     box.append(el("b",{text:recent.length + " thread" + (recent.length === 1 ? "" : "s") + " not on any card"}));
-    recent.forEach(r => box.append(el("span",{text:(r.folder || "unknown folder") + " (" + (r.session || r.id) + ", " + ago(r.at) + "): " + (r.why || "")})));
+    // Named by its thread title and its project's other threads when the listing gave them.
+    recent.forEach(r => { const peers = arr(r.threads).filter(Boolean);
+      box.append(el("span",{text:(r.title ? "\u201c" + r.title + "\u201d in " : "") + (r.folder || "unknown folder") + " (" + (r.session || r.id) + ", " + ago(r.at) + "): " + (r.why || "") + (peers.length ? "; its project's threads: " + peers.join(", ") : "")})); });
   }
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
@@ -269,6 +280,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const raw = t.status ? stKey(t.status) : "";
     const jobs = jobsOf(t);
     let S = raw ? {key:raw} : (jobs.length ? {key:"idle"} : null);
+    if (S && S.key === "idle" && openAsks(t).length) S = {key:"waiting"};   // still lists what it waits on
     if (S && S.key === "idle" && jobs.length) S = {key:"working"};
     return S;
   }

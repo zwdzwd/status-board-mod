@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.4'
+const VERSION = '0.14.5'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -370,6 +370,8 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (list) { if (list.length) n.asks = list; else delete n.asks }
         else if (Array.isArray(n.asks) && status === 'thinking' && asksWork) n.asks = n.asks.map(a => ({ ...a, work: at }))
         else if (Array.isArray(n.asks) && status && status !== 'thinking') n.asks = n.asks.map(({ work: _w, ...a }) => a)
+        // A thread that still lists items waits on the user, even when its turn ended without the line.
+        if (n.status === 'idle' && Array.isArray(n.asks) && n.asks.length) { n.status = 'waiting_on_you'; n.waiting = n.asks[0]!.text }
         delete n.todo                                               // the 0.13 progress checklist, retired
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
@@ -397,7 +399,7 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (seen && seenList === seen) seenList = null
         asksSaid = null
         if (status === 'thinking') asksWork = false
-        if (status) lastWrite = status
+        if (status) lastWrite = String(th.find(t => isMine(t, ids))?.status || status)
         if (jobsNow) jobsWritten = JSON.stringify(jobsNow)
         say($, `board: ${f.name} / ${f.label}${status ? ' → ' + status.replace(/_/g, ' ') : ''}${ended ? ' (ended)' : ''}${seen ? ' (thread list synced)' : ''}`)
         return
@@ -595,6 +597,9 @@ async function placeNow($: Engine, list: ProjThread[]): Promise<void> {
   const me = list.find(p => p.ids.some(i => myIds().some(m => same(i, m))))
   if (me && !me.open) { removed = true; return }
   const c = await threadCard($, await cards($), list)
+  // The listing's thread titles say which project this is, so the board can name it.
+  unmatchedTitle = me ? me.name : ''
+  unmatchedPeers = list.filter(p => p.open && p !== me).map(p => p.name).slice(0, 8)
   if (!c) { unmatchedWhy = skipped ? `the ${skipped} card shares this repository but lists another project's threads` : 'no card holds this project\'s threads'; return }
   found = await registerThread($, c)
   if (found) { removed = false; registeredHere = found.label === PLACEHOLDER; void indexWrite($, found); say($, `board: registered on ${found.name} from the project's thread list`) }
@@ -604,6 +609,8 @@ const placeFrom = ($: Engine, list: ProjThread[]) => enqueue($, 'registration', 
 // A thread the mod cannot place shows on the board as unmatched (collection "unmatched"), never on a
 // guessed card; the record goes once the thread is placed.
 let unmatchedWhy = ''
+let unmatchedTitle = ''                  // this thread's title, and its project's other threads, from the listing
+let unmatchedPeers: string[] = []
 let unmatchedWritten = false
 let unmatchedChecked = false             // the record for this id was looked for once after placement
 async function dropUnmatched($: Engine, id: string): Promise<void> {
@@ -626,8 +633,8 @@ async function unmatched($: Engine): Promise<void> {
     try { folder = await $.session.cwd() } catch {}
     const why = unmatchedWhy || 'no card holds this project\'s threads'
     const d = await getDoc($, 'unmatched', sessionId)
-    if (d && d.data.why === why) { unmatchedWritten = true; return }
-    const args: Record<string, unknown> = { action: 'set', collection: 'unmatched', doc_id: sessionId, data: { session: remoteId, transcript: sessionId, folder, why, version: VERSION, at: now() } }
+    if (d && d.data.why === why && (d.data.title ?? '') === unmatchedTitle && JSON.stringify(d.data.threads ?? []) === JSON.stringify(unmatchedPeers)) { unmatchedWritten = true; return }
+    const args: Record<string, unknown> = { action: 'set', collection: 'unmatched', doc_id: sessionId, data: { session: remoteId, transcript: sessionId, folder, why, title: unmatchedTitle, threads: unmatchedPeers, version: VERSION, at: now() } }
     if (d) args.if_version = d.version
     await call($, args)
     unmatchedWritten = true
@@ -725,7 +732,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
-  unread = []; unmatchedWhy = ''; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
+  unread = []; unmatchedWhy = ''; unmatchedTitle = ''; unmatchedPeers = []; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
   jobsNow = null; threadId = ''; priorIds = []; asksSaid = null; asksWork = false
 }
 
@@ -971,6 +978,9 @@ export const register: Register = on => {
         await initPromise                     // a first turn can end before the lookup has
         if (noBoard || coordinator || seq !== turnSeq) return
         if (!found) found = await indexLookup($)                     // the user may have placed this chat
+        if (!found && remoteId) {                                   // or this thread's Claude did, on a new card
+          try { found = findIn(await cards($)); if (found) void indexWrite($, found) } catch {}
+        }
         if (!found && remoteId) {                                   // a listing this turn, the model's or the mod's
           const l = seenList ? seenList.list : await projectThreads($)
           if (l) await placeFrom($, l)

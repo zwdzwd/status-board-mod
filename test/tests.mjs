@@ -513,5 +513,59 @@ console.log('T3. a turn the user starts marks the waiting items as being worked 
   await E.fire('turn.complete', { answer: 'Noted.', reason: 'answer' }); await settle()
   ok(E.entry('methscope').asks.length === 1 && !E.entry('methscope').asks[0].work, 'a turn ending without the line unmarks the items') }
 
+console.log('T4. a thread that still lists items is waiting on the user, not idle')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle', asks: [{ id: 'x1', text: 'Pick the title', at: 't' }] }]) })
+  await E.fire('session.start', {}); await settle()
+  ok(E.entry('methscope').status === 'waiting_on_you' && E.entry('methscope').waiting === 'Pick the title', 'a session start keeps it waiting')
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'Waiting on you: nothing', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').status !== 'waiting_on_you' && !E.entry('methscope').asks, 'an emptied list lets it go idle') }
+
+console.log('T5. a thread its Claude adds to a new, empty card is found at the end of the turn')
+{ const E = await env({ db: { projects: { lab: { name: 'LAB', threads: [] } } } })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: '/board-status' }); await settle()
+  E.db.projects.lab.threads = [{ label: 'Budget', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa' }]
+  await E.fire('turn.complete', { answer: 'Added.\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  ok(E.db.projects.lab.threads.length === 1 && !!E.db.projects.lab.threads[0].status, 'the entry gets its status') }
+
+console.log('T6. /board-status on a new project: the unmatched row names the thread; seeding the empty card places it and syncs the rest')
+{ const RID = 'cse_01REMOTEaaaaaaaaaaaaaaaa'
+  const listing = JSON.stringify({ sessions: [{ session_id: RID, thread_id: 'cmsg_ME', title: 'Budget', status: 'active' }, { session_id: 'cse_D', thread_id: 'cmsg_D', title: 'DiskCleanup', status: 'active' }, { session_id: 'cse_R', thread_id: 'cmsg_R', title: 'Old', status: 'resolved' }] })
+  const E = await env({ db: { projects: { lab: { name: 'LAB', threads: [] } } } })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: '/board-status' }); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: listing }); await settle()
+  await E.fire('turn.complete', { answer: 'No card yet.\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  const u = (E.db.unmatched || {})[E.state.id]
+  ok(u && u.title === 'Budget' && (u.threads || []).join('|') === 'DiskCleanup', 'the unmatched row names the thread and its project\'s open threads')
+  await E.fire('turn.start', { text: '/board-status' }); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: listing }); await settle()
+  E.db.projects.lab.threads = [{ label: 'Budget', url: 'https://claude.ai/code/project/chan_L?thread=cmsg_ME', session: RID }]
+  await E.fire('turn.complete', { answer: 'Added.\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  const th = E.db.projects.lab.threads
+  ok(th.length === 2 && !!th[0].status, 'the seeded entry gets its status')
+  ok(th.some(x => x.label === 'DiskCleanup' && x.url === 'https://claude.ai/code/project/chan_L?thread=cmsg_D' && x.session === 'cse_D'), 'the project\'s other open thread is added, linked')
+  ok(!(E.db.unmatched || {})[E.state.id], 'the unmatched row is gone') }
+
+console.log('T7. an unmatched row written before any listing is rewritten once a listing names the thread')
+{ const E = await env({ db: { projects: { lab: { name: 'LAB', threads: [] } } }, tools: ['ArtifactData', 'mcp__hb__list_threads'] })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  const u0 = (E.db.unmatched || {})[E.state.id]
+  ok(u0 && !u0.title, 'a row without a title at first')
+  await E.fire('turn.start', { text: '/board-status' }); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_thread_sessions' }, { text: JSON.stringify({ sessions: [{ session_id: 'cse_01REMOTEaaaaaaaaaaaaaaaa', thread_id: 'cmsg_ME', title: 'Budget', status: 'active' }] }) }); await settle()
+  await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
+  ok(((E.db.unmatched || {})[E.state.id] || {}).title === 'Budget', 'the row now names the thread') }
+
+console.log('V. one version number across the five parts')
+{ const fs = await import('node:fs'); const r = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')
+  const v = r('VERSION').trim()
+  const seen = { 'plugin.json': JSON.parse(r('.claude-plugin/plugin.json')).version, 'register.ts': /const VERSION = '([^']+)'/.exec(r('hooks/register.ts'))?.[1],
+    'project-board.html': /const VERSION = "([^"]+)"/.exec(r('board/project-board.html'))?.[1], 'rules.md': /— v(\S+)/.exec(r('board/rules.md'))?.[1] }
+  for (const [f, x] of Object.entries(seen)) ok(x === v, `${f} is at ${x}, VERSION at ${v}`) }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

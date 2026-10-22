@@ -9,7 +9,8 @@ Five parts, one version number (`VERSION`; the same string is in
   thread it writes the thread's status (thinking / waiting on you / idle) at the start and end
   of every turn, the thread's running background jobs (the board lights "working"), and its
   "waiting on you" list, read from the "Waiting on you:" line the thread ends each message with
-  (see the board-status skill); the thread drops an item once it is addressed. It
+  (see the board-status skill); the thread drops an item once it is addressed, and while a turn
+  the user started runs, the board marks its items as being worked on. It
   places a new thread on the card that holds its project's other threads, by the project's
   thread listing; a thread it cannot place shows on the board as "not on any card", never on a
   guessed card. The card's thread list is synced only by `/board-status`. A project
