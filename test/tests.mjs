@@ -560,6 +560,22 @@ console.log('T7. an unmatched row written before any listing is rewritten once a
   await E.fire('turn.complete', { answer: 'ok', reason: 'answer' }); await settle()
   ok(((E.db.unmatched || {})[E.state.id] || {}).title === 'Budget', 'the row now names the thread') }
 
+console.log('T8. an indented line under an item is its context ("more"), which stays with the item')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'Done.\n\nWaiting on you:\n- Approve the push\n  Board-only change; it drops the stale mark.\n  Nothing to reinstall.\n- Pick the Fig 2 layout', reason: 'answer' }); await settle()
+  const as = E.entry('methscope').asks
+  ok(as.length === 2 && as[0].more === 'Board-only change; it drops the stale mark. Nothing to reinstall.' && !as[1].more, 'context kept for its item only')
+  const id = as[0].id
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'Waiting on you:\n- Approve the push\n- Pick the Fig 2 layout\n  Two options in the montage.', reason: 'answer' }); await settle()
+  const bs = E.entry('methscope').asks
+  ok(bs[0].id === id && bs[0].more === 'Board-only change; it drops the stale mark. Nothing to reinstall.' && bs[1].more === 'Two options in the montage.', 'an item listed again without context keeps its own; a new one is added')
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'Waiting on you:\n- Approve the push\n  Now also bumps the version.\n- Pick the Fig 2 layout', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').asks[0].more === 'Now also bumps the version.' && E.entry('methscope').asks[1].more === 'Two options in the montage.', 'a new context line replaces the old one') }
+
 console.log('V. one version number across the five parts')
 { const fs = await import('node:fs'); const r = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')
   const v = r('VERSION').trim()

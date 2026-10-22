@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.6'
+const VERSION = '0.14.7'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -29,7 +29,7 @@ const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_
 
 type Job = { text: string; type: string; id: string }
 // One thing a thread waits on the user for.
-type Ask = { id: string; text: string; at: string; work?: string }
+type Ask = { id: string; text: string; at: string; work?: string; more?: string }
 type Thread = { jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
@@ -70,6 +70,7 @@ let jobsWritten = ''
 // The "Waiting on you" items the thread wrote this turn, for the next status write; null when this
 // turn's message had no such line (the list then stays as it was).
 let asksSaid: string[] | null = null
+let asksMore: Record<string, string> = {}   // context lines under the items, by item text (lowercased)
 // A turn the user started: the thread's open items are marked as being worked on until the turn ends.
 let asksWork = false
 let replyText = ''                       // the turn's last message to the user through a reply tool
@@ -666,27 +667,38 @@ function mergedAsks(cur: Ask[] | undefined, others: Set<string> = new Set()): As
   const at = now(), old = (Array.isArray(cur) ? cur : []).filter(a => a && a.id && a.text && !(a as { done_at?: string }).done_at)
   return (asksSaid || []).filter(text => !others.has(text.toLowerCase())).map((text, k) => {
     const kept = old.find(a => a.text.toLowerCase() === text.toLowerCase())
-    return kept ? { id: kept.id, text, at: kept.at } : { id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }
+    // An item's context stays with it: a later message that lists the item again without a context
+    // line keeps the one it had, and a new context line replaces it.
+    const more = asksMore[text.toLowerCase()] || kept?.more
+    const a: Ask = kept ? { id: kept.id, text, at: kept.at } : { id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }
+    return more ? { ...a, more } : a
   })
 }
 // The "Waiting on you" line in a message: "Waiting on you: X" (several items split by ";"), or that
 // heading followed by bullet lines. "Waiting on you: nothing" (or none) clears the list. null when
 // the message has no such line.
-function waitingSaid(text: string): string[] | null {
+// An indented line under a bullet adds context to that item, kept as its "more".
+type Said = { items: string[]; more: Record<string, string> }
+function waitingSaid(text: string): Said | null {
   const lines = String(text || '').split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
     const m = /^\s*(?:[#>*_\s-]*)waiting on you\b[*_]*\s*[:：]?[*_]*\s*(.*)$/i.exec(lines[i] || '')
     if (!m) continue
-    const items: string[] = []
+    const items: string[] = [], notes: string[] = []
     const rest = (m[1] || '').replace(/^[*_\s]+|[*_\s]+$/g, '')
-    if (rest) items.push(...rest.split(/;\s*/))
+    if (rest) for (const x of rest.split(/;\s*/)) { items.push(x); notes.push('') }
     for (let k = i + 1; k < lines.length; k++) {
-      const b = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(lines[k] || '')
-      if (!b) { if ((lines[k] || '').trim()) break; if (items.length) break; continue }
-      items.push(b[1] || '')
+      const line = lines[k] || ''
+      const b = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(line)
+      if (b) { items.push(b[1] || ''); notes.push(''); continue }
+      if (/^\s{2,}\S/.test(line) && items.length) { notes[notes.length - 1] = (notes[notes.length - 1] + ' ' + line.trim()).trim(); continue }
+      if (line.trim()) break
+      if (items.length) break
     }
-    const clean = items.map(lean).filter(Boolean)
-    return clean.length === 1 && /^(nothing|none|no(thing)? (is )?waiting)\b/i.test(clean[0]!) ? [] : clean.slice(0, 12)
+    const clean: string[] = [], more: Record<string, string> = {}
+    items.forEach((x, k) => { const t = lean(x); if (!t) return; clean.push(t); if (notes[k]) more[t.toLowerCase()] = notes[k]!.slice(0, 600) })
+    if (clean.length === 1 && /^(nothing|none|no(thing)? (is )?waiting)\b/i.test(clean[0]!)) return { items: [], more: {} }
+    return { items: clean.slice(0, 12), more }
   }
   return null
 }
@@ -733,7 +745,7 @@ function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
   unread = []; unmatchedWhy = ''; unmatchedTitle = ''; unmatchedPeers = []; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
-  jobsNow = null; threadId = ''; priorIds = []; asksSaid = null; asksWork = false
+  jobsNow = null; threadId = ''; priorIds = []; asksSaid = null; asksMore = {}; asksWork = false
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -772,7 +784,7 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // /board-status runs the board-status skill: the thread's check-in write and its listing call.
-const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name, listing only what this thread itself needs (never other threads\' items or the card\'s); the mod puts that list on the board.'
+const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name, listing only what this thread itself needs (never other threads\' items or the card\'s), each optionally followed by one indented line of context; the mod puts that list on the board.'
 function noteBody(count: boolean, v: string): string {
   const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. ${sync}${IN_PLACE}`
@@ -920,7 +932,7 @@ export const register: Register = on => {
     if (e.agentId === undefined && /(^|__)reply$/.test(tool)) {
       replyText = String((e as unknown as Record<string, unknown>).text ?? '')
       const said = waitingSaid(replyText)
-      if (said) asksSaid = said
+      if (said) { asksSaid = said.items; asksMore = said.more }
       return next(e)
     }
     if (e.agentId !== undefined || !LIST.test(tool)) return next(e)
@@ -971,7 +983,7 @@ export const register: Register = on => {
     // What the user read this turn: a project thread's reply when it sent one, else the final answer.
     const answer = replyText || String(e.answer || '')
     replyText = ''
-    { const said = waitingSaid(String(e.answer || '')); if (said) asksSaid = said }
+    { const said = waitingSaid(String(e.answer || '')); if (said) { asksSaid = said.items; asksMore = said.more } }
     // The rest runs in the background so the turn ends at once; a newer turn's status wins.
     void (async () => {
       try {
