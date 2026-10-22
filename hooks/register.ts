@@ -8,10 +8,10 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
 // call then places it and makes the list match the project's open threads. What the thread waits on
 // the user for is the "Waiting on you" line the thread writes in its message each turn: the mod reads
-// it and keeps it as the entry's "asks" list, written with the turn's status writes; the user can
-// tick an item off on the board (collection "ticks").
+// it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
+// changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.0'
+const VERSION = '0.14.1'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -28,9 +28,8 @@ const LIST = /(^|__)(list_threads|list_thread_sessions)$/
 const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
 type Job = { text: string; type: string; id: string }
-// One thing a thread waits on the user for. done_at is set when the thread ticks it, or when the
-// user ticks it on the board (a ticks/<id> document the plugin folds in at its next write).
-type Ask = { id: string; text: string; at: string; done_at?: string }
+// One thing a thread waits on the user for.
+type Ask = { id: string; text: string; at: string }
 type Thread = { jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
@@ -351,21 +350,18 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
       }
       const at = now()
       const seen = seenList
-      const mineNow = threadsOf(card).find(t => isMine(t, ids))
-      const ticked = await ticksFor($, mineNow ? mineNow.asks : undefined)
       let th = threadsOf(card).map(t => {
         if (!isMine(t, ids)) return t
         const n: Thread = { ...t }
         if (status) { n.status = status; n.at = at; if (status !== 'waiting_on_you') delete n.waiting }
         if (waiting && status === 'waiting_on_you') n.waiting = waiting
         // A thread that keeps a list says on the board what it says in the thread: its newest open item.
-        const list = asksSaid !== null || n.asks ? mergedAsks(n.asks, ticked) : undefined
-        const openNow = (list || []).filter(a => !a.done_at)
-        if (status === 'waiting_on_you' && openNow.length) n.waiting = openNow[0]!.text
+        const list = asksSaid !== null ? mergedAsks(n.asks) : undefined
+        if (status === 'waiting_on_you' && list && list.length) n.waiting = list[0]!.text
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
         if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
-        if (list) n.asks = list
+        if (list) { if (list.length) n.asks = list; else delete n.asks }
         delete n.todo                                               // the 0.13 progress checklist, retired
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
@@ -640,29 +636,15 @@ async function checkMail($: Engine, cardId: string): Promise<void> {
 const mailNote = (f: Found) => unread.length ? ` The ${f.name} project has ${unread.length} unread note${unread.length === 1 ? '' : 's'} on the Status Board (${unread.slice(0, 3).join('; ')}${unread.length > 3 ? '; …' : ''}). Load the status-board-messaging skill to read ${unread.length === 1 ? 'it' : 'them'} and tell the user what ${unread.length === 1 ? 'it asks' : 'they ask'}.` : ''
 
 // ---- What the thread waits on the user for ----
-// The board's ticks for this entry's open items: ticks/<ask id> documents the user writes there.
-async function ticksFor($: Engine, asks: Ask[] | undefined): Promise<Map<string, string>> {
-  const open = (Array.isArray(asks) ? asks : []).filter(a => a && !a.done_at).map(a => a.id).filter(Boolean)
-  const out = new Map<string, string>()
-  for (let i = 0; i < open.length; i += 10) {
-    try { for (const d of parseDocs(await call($, { action: 'query', collection: 'ticks', query: { where: [['ask', 'in', open.slice(i, i + 10)]] } }))) out.set(String(d.data.ask), String(d.data.at || now())) } catch {}
-  }
-  return out
-}
-// The entry's list as the thread last said it: items it wrote stay (keeping their id and time), new ones
-// are added, ones it no longer lists are closed; an item ticked on the board is closed too. Items
-// closed more than a day ago are dropped.
-function mergedAsks(cur: Ask[] | undefined, ticked: Map<string, string>): Ask[] {
-  const at = now()
-  const list = (Array.isArray(cur) ? cur : []).filter(a => a && a.id && a.text).map(a => ({ ...a }))
-  if (asksSaid !== null) {
-    const said = asksSaid.map(t => t.toLowerCase())
-    for (const a of list) if (!a.done_at && !said.includes(a.text.toLowerCase())) a.done_at = at
-    asksSaid.forEach((text, k) => { if (!list.some(x => !x.done_at && x.text.toLowerCase() === text.toLowerCase()))
-      list.push({ id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }) })
-  }
-  for (const a of list) if (!a.done_at && ticked.has(a.id)) a.done_at = ticked.get(a.id)
-  return list.filter(a => !a.done_at || Date.now() - Date.parse(a.done_at) < 24 * 3600000).slice(-30)
+// ---- What the thread waits on the user for ----
+// The entry's list as the thread last said it: items it still lists keep their id and time, new ones
+// are added, and ones it no longer lists are gone.
+function mergedAsks(cur: Ask[] | undefined): Ask[] {
+  const at = now(), old = (Array.isArray(cur) ? cur : []).filter(a => a && a.id && a.text && !(a as { done_at?: string }).done_at)
+  return (asksSaid || []).map((text, k) => {
+    const kept = old.find(a => a.text.toLowerCase() === text.toLowerCase())
+    return kept ? { id: kept.id, text, at: kept.at } : { id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }
+  })
 }
 // The "Waiting on you" line in a message: "Waiting on you: X" (several items split by ";"), or that
 // heading followed by bullet lines. "Waiting on you: nothing" (or none) clears the list. null when

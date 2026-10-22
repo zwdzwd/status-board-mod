@@ -82,9 +82,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
 .tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
 .tbtn .asksn{margin-left:3px;padding:0 5px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bad);background:var(--bad-soft)}
-#tip label.ask{display:flex;gap:6px;align-items:flex-start;cursor:pointer;margin:1px 0}
-#tip label.ask input{margin-top:3px}
-#tip label.ask.done span{text-decoration:line-through;color:var(--muted)}
 .tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 @keyframes pulse{50%{opacity:.25}}
 @media (prefers-reduced-motion: reduce){.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:none}}
@@ -154,7 +151,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.0";
+  const VERSION = "0.14.1";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -253,9 +250,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // older single "job" line.
   const jobsOf = t => { const js = arr(t.jobs).map(j => typeof j === "string" ? j : (j && j.text) || "").map(x => String(x).trim()).filter(Boolean);
     return js.length || Array.isArray(t.jobs) ? js : ((typeof t.job === "string" && t.job.trim()) ? [t.job.trim()] : []); };
-  // What a thread waits on you for ("asks": [{id, text, at, done_at?}]), kept by the thread; an item is
-  // open until the thread or you tick it (your tick is a ticks/<id> document the plugin folds in).
-  let ticks = {};
+  // What a thread waits on you for ("asks": [{id, text, at}]), kept by the thread from its "Waiting on you"
+  // line; the thread takes an item off once it is addressed.
   // Waiting lines read lean: a "Wanding:" or "waiting on you" lead-in says nothing on a W line.
   const LEAD = /^\s*(?:waiting on (?:you|wanding|the user)\s*(?:for|to|:|,|-)?\s*|(?:wanding|the user|user|you)\s*(?:needs? to|should|must|to|:|,|-)\s*)/i;
   const lean = x => { let t = String(x || "").trim(); for (let i = 0; i < 2 && LEAD.test(t); i++) t = t.replace(LEAD, ""); if (/^(in|on|at)\b/i.test(t)) t = "Reply " + t; return t ? t[0].toUpperCase() + t.slice(1) : t; };
@@ -300,7 +296,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const txt = el("div",{class:"text"}); body.append(txt);
     // What waits on you comes first, since it matters most: the open items the threads keep (up to
     // three lines, then a count), else the threads' waiting lines, else the card's blocker.
-    const items = waitingItems(p).filter(x => !ticks[x.a.id]).map(x => x.a.text);
+    const items = waitingItems(p).map(x => x.a.text);
     const waits = (items.length ? items : asks(p).concat(arr(p.blocker), arr(p.blockers))).map(lean).filter(Boolean);
     waits.slice(0, 3).forEach((x, k) => txt.append(el("p",{class:"line bad"}, el("b",{text:k ? "·" : "W",title:"Waiting on you"}), x)));
     if (waits.length > 3) txt.append(el("p",{class:"line bad more"},"+ " + (waits.length - 3) + " more waiting on you"));
@@ -320,11 +316,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     return arr(p.threads).filter(Boolean).flatMap(t => openAsks(t).map(a => ({t, a})))
       .sort((x, y) => String(y.a.at || "").localeCompare(String(x.a.at || "")));
   }
-  async function tick(a){
-    ticks[a.id] = {ask: a.id, at: new Date().toISOString()};
-    render();
-    if (dbRef) { try { await dbRef.doc("ticks/" + a.id).set(ticks[a.id]); } catch(e){ delete ticks[a.id]; render(); } }
-  }
   function asks(p){
     // Every thread waiting on you is named, with its line or, from an older plugin without one, a pointer to the thread.
     return arr(p.threads).filter(t => t && (threadState(t) || {}).key === "waiting")
@@ -333,13 +324,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   }
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
-    // Waiting on you: each thread's open items as checkboxes you can tick, then any waiting lines and the blocker.
-    const items = waitingItems(p), bl = asks(p).concat(arr(p.blocker), arr(p.blockers));
+    // Waiting on you: each thread's open items, then (from threads that keep no list) waiting lines and the blocker.
+    const items = waitingItems(p), bl = items.length ? arr(p.blocker).concat(arr(p.blockers)) : asks(p).concat(arr(p.blocker), arr(p.blockers));
     if (items.length || bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"}));
-      items.forEach(({t: th, a}) => { const done = !!ticks[a.id];
-        const box = el("input",{type:"checkbox",title:done ? "Ticked; the thread sees it at its next turn" : "Tick when done"}); box.checked = done; box.disabled = done;
-        box.addEventListener("click", ev => { ev.stopPropagation(); if (!done) tick(a); });
-        w.append(el("label",{class:"ask" + (done ? " done" : "")}, box, el("span",{text:(th.label || "Thread") + ": " + lean(a.text)}))); });
+      items.forEach(({t: th, a}) => w.append(el("p",{text:"○ " + (th.label || "Thread") + ": " + lean(a.text)})));
       bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));
@@ -375,7 +363,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   function threadButton(t){
     const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s), jobs = jobsOf(t);
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
-    const waitingN = openAsks(t).filter(a => !ticks[a.id]).length;
+    const waitingN = openAsks(t).length;
     const prog = waitingN ? el("span",{class:"asksn",text:String(waitingN)}) : null;
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
@@ -422,7 +410,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const db = await claude.use("db"); dbRef = db;
     if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
     $("notesBtn").onclick = () => { notesOpen = !notesOpen; try { localStorage.setItem("sb-notes", notesOpen ? "1" : "0"); } catch(e){} renderNotes(); };
-    db.collection("ticks").onSnapshot(snap => { ticks = {}; snap.docs.filter(d => d.exists).forEach(d => ticks[d.id] = d.data()); if (projects.length) render(); }, () => {});
     db.collection("messages").onSnapshot(snap => { messages = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); renderNotes(); }, () => {});
     db.collection("unmatched").onSnapshot(snap => renderUnmatched(snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(snap => {

@@ -9,7 +9,7 @@ Five parts, one version number (`VERSION`; the same string is in
   thread it writes the thread's status (thinking / waiting on you / idle) at the start and end
   of every turn, the thread's running background jobs (the board lights "working"), and its
   "waiting on you" list, read from the "Waiting on you:" line the thread ends each message with
-  (see the board-status skill), which you can tick off on the board. It
+  (see the board-status skill); the thread drops an item once it is addressed. It
   places a new thread on the card that holds its project's other threads, by the project's
   thread listing; a thread it cannot place shows on the board as "not on any card", never on a
   guessed card. The card's thread list is synced only by `/board-status`. A project
@@ -118,4 +118,4 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
 - Other collections: `sessions/<uuid>` (the plugin's index: which card and thread a session is),
   `unmatched/<uuid>` (threads the plugin could not place, shown on the board), `checkins/<thread
   id>` (the `/board-status` write that, in auto mode, lets the plugin write for the session),
-  `ticks/<ask id>` (items you ticked on the board), `messages` (notes between projects) and `meta/instruction` (the rules).
+  `messages` (notes between projects) and `meta/instruction` (the rules).

@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.0
+# Status Board rules (meta/instruction) — v0.14.1
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -64,13 +64,12 @@ does the per-turn bookkeeping by itself:
     at, done_at?}], from the line the thread's Claude ends each
     message to me with: "Waiting on you: <item>; <item>" (or a
     "Waiting on you" heading with bullets, or "Waiting on you:
-    nothing"). Items are bare imperatives without my name. An item the
-    thread no longer lists is closed. I can tick an item on the board
-    (a ticks/<id> document); the mod folds that in at its next write.
-    The list goes out with the turn's status writes. The board counts
-    open items on the thread's button, puts them first on the card,
-    and lists them as checkboxes in the opened card. Leave it as the
-    mod wrote it;
+    nothing"). Items are bare imperatives without my name. Only the
+    thread changes the list: once an item is addressed it stops
+    listing it, and it is gone. The list goes out with the turn's
+    status writes. The board counts open items on the thread's button,
+    puts them first on the card, and lists them in the opened card.
+    Leave it as the mod wrote it;
   - in auto mode the mod's board writes need one approval that only
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at

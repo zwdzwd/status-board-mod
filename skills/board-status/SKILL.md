@@ -39,6 +39,5 @@ board will show. The Status Board mod reads it and keeps it as this thread's "wa
   bullet lines.
 - Nothing: `Waiting on you: nothing`. This clears the list.
 
-Write each item as a bare imperative under 12 words, with no name, no "you", and no "please". An
-item you no longer list is closed. The user can also tick an item off on the board, and it then
-drops off; do not list it again unless it is still needed.
+Write each item as a bare imperative under 12 words, with no name, no "you", and no "please". Once
+the user has addressed an item, stop listing it; it then leaves the board.

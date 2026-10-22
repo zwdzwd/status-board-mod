@@ -472,30 +472,25 @@ console.log('Y. the board address comes from the board skill (or its old name), 
   await E.fire('session.start', {}); await settle()
   ok(E.entry('methscope') && (await E.note()).includes(BOARD), 'no skill on disk: the built-in board') }
 
-console.log('T. the thread\'s "Waiting on you" line becomes the entry\'s asks; board ticks close items; written only with status writes')
+console.log('T. the thread\'s "Waiting on you" line is the entry\'s asks; only the thread changes it; written only with status writes')
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle', todo: { title: 'old' } }]) })
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await settle()
   const before = E.writes.filter(w => w.c === 'projects').length
   await E.fire('tool.call', { tool: 'mcp__hearthbot__reply', text: 'Draft is up.\n\n**Waiting on you:**\n- Wanding: review Fig 2\n- Pick the title\n\nThanks.' }, { result: 'sent' }); await settle()
   ok(E.writes.filter(w => w.c === 'projects').length === before, 'no write of its own')
-  E.state.classify = 0; E.state.summary = 'Review Fig 2'
   await E.fire('turn.complete', { answer: '', reason: 'answer' }); await settle()
   let a = E.entry('methscope').asks
   ok(a && a.map(x => x.text).join('|') === 'Review Fig 2|Pick the title' && E.entry('methscope').todo === undefined, 'two items, name stripped, old todo removed: ' + JSON.stringify(a))
-  ok(E.entry('methscope').waiting === 'Review Fig 2', 'waiting line is the first item')
-  E.db.ticks = { [a[1].id]: { ask: a[1].id, at: '2026-10-22T03:30:00Z' } }
-  await E.fire('turn.start', {}); await settle()
+  ok(E.entry('methscope').status === 'waiting_on_you' && E.entry('methscope').waiting === 'Review Fig 2', 'waiting, its line the first item')
+  const id0 = a[0].id
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'All set.\nWaiting on you: Review Fig 2; Send the cover letter', reason: 'answer' }); await settle()
   a = E.entry('methscope').asks
-  ok(!a[0].done_at && a[1].done_at === '2026-10-22T03:30:00Z', 'board tick closes an item')
-  E.state.classify = 1
-  await E.fire('turn.complete', { answer: 'All set.\nWaiting on you: Review Fig 2; Send the cover letter', reason: 'answer' }); await settle()
-  a = E.entry('methscope').asks
-  ok(a.filter(x => !x.done_at).map(x => x.text).join('|') === 'Review Fig 2|Send the cover letter', 'one-line form, an id kept for an item still listed: ' + JSON.stringify(a))
-  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Done.\nWaiting on you: nothing', reason: 'answer' }); await settle()
-  ok(E.entry('methscope').asks.every(x => x.done_at), 'nothing clears the list')
+  ok(a.map(x => x.text).join('|') === 'Review Fig 2|Send the cover letter' && a[0].id === id0, 'addressed item gone, new one added, kept item keeps its id: ' + JSON.stringify(a))
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'More work.', reason: 'answer' }); await settle()
-  ok(E.entry('methscope').asks.every(x => x.done_at), 'a turn without the line leaves the list as it was') }
+  ok(E.entry('methscope').asks.length === 2, 'a turn without the line leaves the list as it was')
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Done.\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').asks === undefined, 'nothing empties the list') }
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
