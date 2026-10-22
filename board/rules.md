@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.1
+# Status Board rules (meta/instruction) — v0.14.2
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -62,9 +62,8 @@ does the per-turn bookkeeping by itself:
     jobs;
   - it keeps the thread's "waiting on you" list, "asks": [{id, text,
     at, done_at?}], from the line the thread's Claude ends each
-    message to me with: "Waiting on you: <item>; <item>" (or a
-    "Waiting on you" heading with bullets, or "Waiting on you:
-    nothing"). Items are bare imperatives without my name. Only the
+    message to me with: a "Waiting on you:" heading and one bullet
+    per item, each on its own line (or "Waiting on you: nothing"). Items are bare imperatives without my name. Only the
     thread changes the list: once an item is addressed it stops
     listing it, and it is gone. The list goes out with the turn's
     status writes. The board counts open items on the thread's button,

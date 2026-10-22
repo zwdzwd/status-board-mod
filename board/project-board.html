@@ -81,6 +81,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn.stale{border:1px dashed currentColor;opacity:.75}
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
 .tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
+#tip .askhead{margin:3px 0 0;font-weight:600} #tip .askhead a{color:inherit}
+#tip .asklist{margin:0 0 2px;padding-left:18px} #tip .asklist li{margin:0}
 .tbtn .asksn{margin-left:3px;padding:0 5px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bad);background:var(--bad-soft)}
 .tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 @keyframes pulse{50%{opacity:.25}}
@@ -151,7 +153,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.1";
+  const VERSION = "0.14.2";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -327,7 +329,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     // Waiting on you: each thread's open items, then (from threads that keep no list) waiting lines and the blocker.
     const items = waitingItems(p), bl = items.length ? arr(p.blocker).concat(arr(p.blockers)) : asks(p).concat(arr(p.blocker), arr(p.blockers));
     if (items.length || bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"}));
-      items.forEach(({t: th, a}) => w.append(el("p",{text:"○ " + (th.label || "Thread") + ": " + lean(a.text)})));
+      // Grouped by thread: the thread's name as a link, then its items as bullets.
+      const groups = new Map(); items.forEach(({t: th, a}) => { if (!groups.has(th)) groups.set(th, []); groups.get(th).push(a); });
+      groups.forEach((as, th) => {
+        const name = th.label || "Thread";
+        w.append(el("p",{class:"askhead"}, safe(th.url) ? el("a",{href:th.url,target:"_blank",rel:"noopener",text:name}) : name, ":"));
+        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(el("li",{text:lean(a.text)}))); w.append(ul); });
       bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));

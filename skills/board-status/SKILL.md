@@ -34,10 +34,15 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
 End each message you send the user with one line saying what waits on them, in the same words the
 board will show. The Status Board mod reads it and keeps it as this thread's "waiting on you" list.
 
-- One item: `Waiting on you: Pick the Fig 2 layout`
-- Several: `Waiting on you: Pick the Fig 2 layout; Approve the push`, or that heading followed by
-  bullet lines.
-- Nothing: `Waiting on you: nothing`. This clears the list.
+Write it as a heading with one bullet per item, each on its own line:
+
+```
+Waiting on you:
+- Pick the Fig 2 layout
+- Approve the push
+```
+
+When nothing waits on the user, write `Waiting on you: nothing`; this clears the list.
 
 Write each item as a bare imperative under 12 words, with no name, no "you", and no "please". Once
 the user has addressed an item, stop listing it; it then leaves the board.

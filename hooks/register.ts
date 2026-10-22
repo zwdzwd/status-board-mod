@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.1'
+const VERSION = '0.14.2'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -749,7 +749,7 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // /board-status runs the board-status skill: the thread's check-in write and its listing call.
-const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with one line "Waiting on you: <items, ; separated>" (or "Waiting on you: nothing"), as bare imperatives without the user\'s name; the mod puts that list on the board.'
+const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name; the mod puts that list on the board.'
 function noteBody(count: boolean, v: string): string {
   const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. ${sync}${IN_PLACE}`
