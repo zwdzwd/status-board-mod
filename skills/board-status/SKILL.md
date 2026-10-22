@@ -44,5 +44,8 @@ Waiting on you:
 
 When nothing waits on the user, write `Waiting on you: nothing`; this clears the list.
 
-Write each item as a bare imperative under 12 words, with no name, no "you", and no "please". Once
-the user has addressed an item, stop listing it; it then leaves the board.
+List only what THIS thread itself needs from the user for its own work. Never copy items from
+other threads, from the card (its blocker or next step), or from the project as a whole, even when
+you have just read them on the board: each thread's list is shown under that thread, so a copied
+item shows twice. Write each item as a bare imperative under 12 words, with no name, no "you", and
+no "please". Once the user has addressed an item, stop listing it; it then leaves the board.

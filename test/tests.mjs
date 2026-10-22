@@ -492,5 +492,12 @@ console.log('T. the thread\'s "Waiting on you" line is the entry\'s asks; only t
   await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Done.\nWaiting on you: nothing', reason: 'answer' }); await settle()
   ok(E.entry('methscope').asks === undefined, 'nothing empties the list') }
 
+console.log('T2. a thread does not repeat items another thread on the card already lists')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }, { label: 'Analysis', session: 'cse_A', asks: [{ id: 'a1', text: 'Approve the panel script', at: 't' }] }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'Draft ready.\nWaiting on you:\n- Review section 2\n- approve the panel script', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').asks.map(x => x.text).join('|') === 'Review section 2', 'only its own item kept: ' + JSON.stringify(E.entry('methscope').asks)) }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)
