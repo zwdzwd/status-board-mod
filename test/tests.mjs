@@ -472,5 +472,19 @@ console.log('Y. the board address comes from the board skill (or its old name), 
   await E.fire('session.start', {}); await settle()
   ok(E.entry('methscope') && (await E.note()).includes(BOARD), 'no skill on disk: the built-in board') }
 
+console.log('T. the thread\'s progress checklist goes on the entry with the turn\'s status write, never on its own')
+{ const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  const before = E.writes.filter(w => w.c === 'projects').length
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__update_status', text: 'Figure 3\n\n✓ Read the data\n**✓ Made the panel**\n✱ Writing the legend\n○ Send it' }, { text: 'Status updated.' }); await settle()
+  ok(E.writes.filter(w => w.c === 'projects').length === before && !E.entry('methscope').todo, 'no write of its own')
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__update_status', text: 'Figure 3\n\n✓ x' }, { isError: true, text: 'failed' }); await settle()
+  await E.fire('turn.complete', { answer: 'Done.', reason: 'answer' }); await settle()
+  const t = E.entry('methscope').todo
+  ok(t && t.title === 'Figure 3' && t.items.length === 4, 'written at turn end, the failed call ignored: ' + JSON.stringify(t))
+  ok(t && t.items.map(x => x.mark).join() === 'done,done,doing,todo' && t.items[1].text === 'Made the panel', 'marks read, bold stripped')
+  ok(E.entry('methscope').status === 'idle', 'status written with it') }
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

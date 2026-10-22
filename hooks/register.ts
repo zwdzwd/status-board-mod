@@ -6,9 +6,11 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // under "threads". An entry names its chat by "session" (the remote session id, cse_… / session_…,
 // which the project's own tools use) and "transcript" (this process's session id). The card's thread
 // list changes only when the user sends /board-status (the board-status skill): the thread's listing
-// call then places it and makes the list match the project's open threads.
+// call then places it and makes the list match the project's open threads. The thread's progress
+// checklist goes on the entry as "todo" with the turn's status writes (no writes of its own), and is
+// drawn above the prompt where the surface has that band (the terminal, the desktop app).
 
-const VERSION = '0.12.5'
+const VERSION = '0.13.0'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -25,7 +27,9 @@ const LIST = /(^|__)(list_threads|list_thread_sessions)$/
 const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_thread_connectors)$/
 
 type Job = { text: string; type: string; id: string }
-type Thread = { jobs?: Job[]; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
+type TodoItem = { mark: 'done' | 'doing' | 'todo'; text: string }
+type Todo = { title: string; items: TodoItem[]; at: string }
+type Thread = { jobs?: Job[]; todo?: Todo; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
@@ -62,6 +66,9 @@ let unread: string[] = []
 // hooks: the thread's "jobs" on the card. null until a report has come.
 let jobsNow: Job[] | null = null
 let jobsWritten = ''
+// The thread's to-do checklist, from its last progress checklist: the entry's "todo", written with
+// the next status write (turn start or end), never on its own.
+let todoNow: Todo | null = null
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
@@ -349,6 +356,7 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
         if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
+        if (todoNow) n.todo = todoNow
         if (ended === true) n.ended = at
         if (ended === false) delete n.ended
         return n
@@ -662,7 +670,7 @@ function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
   report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
   unread = []; unmatchedWhy = ''; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
-  jobsNow = null; threadId = ''; priorIds = []
+  jobsNow = null; threadId = ''; priorIds = []; todoNow = null
 }
 
 // After a /clear or a resume the process goes on under another session id, with no session.start.
@@ -779,6 +787,24 @@ function jobText(tool: string, command: unknown): string {
   return (tool.replace(/^mcp__/, '') + (shown.length ? ': ' + shown.join(' ') : '')).slice(0, 60)
 }
 
+// ---- The to-do checklist ----
+// A project thread's progress checklist (update_status): a header line, then one step per line marked
+// ✓ done, ✱ in progress or ○ not started; ** bolds the step just done.
+const STATUS_TOOL = /(^|__)update_status$/
+const MARKS: Record<string, TodoItem['mark']> = { '✓': 'done', '✔': 'done', '✱': 'doing', '○': 'todo' }
+function todoFromStatus(text: unknown): Todo | null {
+  const lines = String(text ?? '').split('\n').map(l => l.replace(/\*\*/g, '').trim()).filter(Boolean)
+  const items: TodoItem[] = []
+  for (const l of lines) {
+    const m = /^([✓✔✱○])\s*(.+)$/.exec(l)
+    if (m && m[1] && m[2]) items.push({ mark: MARKS[m[1]] ?? 'todo', text: oneLine(m[2]) })
+  }
+  if (!items.length) return null
+  const head = lines[0] && !/^[✓✔✱○]/.test(lines[0]) ? oneLine(lines[0]) : 'To-do'
+  return { title: head, items: items.slice(0, 30), at: now() }
+}
+const TICK: Record<TodoItem['mark'], string> = { done: '✓', doing: '✱', todo: '○' }
+
 export const register: Register = on => {
   // The mod's own calls need no permission dialog: its reads and writes of this board, the thread
   // listing, and loading ArtifactData. Anything else it might call goes through the normal check.
@@ -836,7 +862,16 @@ export const register: Register = on => {
   // The model's own thread-listing call (on /board-status): kept for the next status write, and used
   // at once to place a chat that is not on a card yet.
   on('tool.call', async ($, e, next) => {
-    if (e.agentId !== undefined || !LIST.test(String(e.tool || ''))) return next(e)
+    const tool = String(e.tool || '')
+    if (e.agentId === undefined && STATUS_TOOL.test(tool)) {
+      // The thread's checklist: kept for the band and for the next status write, once the call went through.
+      const r = await next(e)
+      const done = r as unknown as ToolResult
+      const t = done.deny === undefined && !done.isError ? todoFromStatus((e as unknown as Record<string, unknown>).text) : null
+      if (t) { todoNow = t; try { $.ui.invalidate('ui.render') } catch {} }
+      return r
+    }
+    if (e.agentId !== undefined || !LIST.test(tool)) return next(e)
     const r = await next(e)
     const l = readListing(r as unknown as ToolResult)
     if (l) {
@@ -844,6 +879,19 @@ export const register: Register = on => {
       if (!found && remoteId && initDone && !noBoard) void placeFrom($, l.list)
     }
     return r
+  })
+
+  // The to-do checklist above the prompt, on the surfaces that have that band.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const t = todoNow
+    if (!t || e.props.hasSurvey) return next(e)
+    const { Box, Text } = $.ui.resolve(e) as any
+    const done = t.items.filter(x => x.mark === 'done').length
+    const room = Math.max(1, Math.min(e.props.maxRows, 12) - 1)
+    const rows = t.items.length > room ? t.items.filter(x => x.mark !== 'done').slice(0, room) : t.items
+    return h(Box, { flexDirection: 'column' },
+      h(Text, { bold: true }, `${t.title} (${done}/${t.items.length})`),
+      ...rows.map(x => h(Text, { dimColor: x.mark === 'done', bold: x.mark === 'doing' }, `${TICK[x.mark]} ${x.text}`)))
   })
 
   // What still runs when the main loop stops: the thread's jobs list, written when it changes.

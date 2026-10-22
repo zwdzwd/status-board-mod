@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.12.5
+# Status Board rules (meta/instruction) — v0.13.0
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -60,6 +60,12 @@ does the per-turn bookkeeping by itself:
     workflows) as Claude Code reports it, [{text, type, id}], empty
     when nothing runs. The board lights "working" on a thread with
     jobs;
+  - it writes the thread's to-do checklist, "todo": {title, items:
+    [{mark, text}], at}, mark done, doing or todo, from the thread's
+    last progress checklist, with the turn's status writes (so the
+    board shows it as of the last turn start or end). The board shows
+    the count on the thread's button and the list in the opened card.
+    Leave it as the mod wrote it;
   - in auto mode the mod's board writes need one approval that only
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
@@ -96,7 +102,7 @@ it finishes.
     answer), at most 12 words, or "" if nothing is. The board shows it
     in red as "Waiting on you"; never put someone else's task here.
   - threads: [{label, url, session, transcript, status, at, jobs,
-    waiting?, ended?}], one
+    todo?, waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or

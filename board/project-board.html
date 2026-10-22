@@ -82,6 +82,10 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
 .tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
 .tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.tbtn .todo{margin-left:4px;font-family:var(--f-mono);font-size:10px;opacity:.8}
+#tip .todos p{margin:1px 0}
+#tip .todos .t-done{color:var(--muted);text-decoration:line-through}
+#tip .todos .t-doing{font-weight:600}
 @keyframes pulse{50%{opacity:.25}}
 @media (prefers-reduced-motion: reduce){.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:none}}
 .meta{font-family:var(--f-mono);font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap}
@@ -150,7 +154,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.12.5";
+  const VERSION = "0.13.0";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -249,6 +253,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // older single "job" line.
   const jobsOf = t => { const js = arr(t.jobs).map(j => typeof j === "string" ? j : (j && j.text) || "").map(x => String(x).trim()).filter(Boolean);
     return js.length || Array.isArray(t.jobs) ? js : ((typeof t.job === "string" && t.job.trim()) ? [t.job.trim()] : []); };
+  // A thread's to-do checklist ("todo": {title, items:[{mark: done|doing|todo, text}], at}), written by the
+  // plugin from the thread's progress checklist.
+  const TICK = {done:"✓", doing:"✱", todo:"○"};
+  const todoOf = t => { const d = t && t.todo; const items = d && arr(d.items).filter(x => x && typeof x.text === "string" && x.text.trim());
+    return items && items.length ? {title: String(d.title || "To-do"), items, at: d.at, done: items.filter(x => x.mark === "done").length} : null; };
   // A thread's state. "status" is the chat itself: thinking (Claude is on a turn), waiting on you, or idle.
   // Background jobs are a separate light on the thread's button; an idle chat with jobs counts as working.
   // Thinking beats working, since a thinking thread can take something else only once it is done.
@@ -317,6 +326,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     // Every running background job, by thread.
     const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
     if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
+    // Each thread's to-do checklist, as its thread last reported it.
+    all.forEach(x => { const d = todoOf(x); if (!d) return;
+      const w = el("div",{class:"todos"}, el("b",{text:(x.label || "Thread") + ": " + d.title + " (" + d.done + "/" + d.items.length + ")"}));
+      d.items.forEach(i => w.append(el("p",{class:"t-" + (TICK[i.mark] ? i.mark : "todo"),text:(TICK[i.mark] || "○") + " " + i.text})));
+      if (d.at) w.append(el("p",{class:"meta",text:"reported " + ago(d.at)}));
+      t.append(w); });
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
   }
   function placeTip(card){
@@ -343,11 +358,14 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   function threadButton(t){
     const s = threadState(t), tk = s ? s.key : "", stale = staleWork(t, s), jobs = jobsOf(t);
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
+    const td = todoOf(t), now = td && td.items.find(x => x.mark === "doing");
+    const prog = td ? el("span",{class:"todo",text:td.done + "/" + td.items.length}) : null;
+    const todoTip = td ? "\nTo-do " + td.done + "/" + td.items.length + (now ? ", now: " + now.text : "") : "";
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
     const state = tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") + (stale ? "; no update for 3h+, may be stale" : "") : "";
-    const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
-    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), light);
+    const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "") + todoTip;
+    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (stale ? " stale" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), prog, light);
   }
 
   function render(){
