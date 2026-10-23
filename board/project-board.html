@@ -83,10 +83,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip .askhead{margin:3px 0 0;font-weight:600} #tip .askhead a{color:inherit}
 #tip .asklist{margin:0 0 2px;padding-left:18px} #tip .asklist li{margin:0}
 .inwork{opacity:.6} .inwork .wk{margin-right:4px}
-#tip .asklist summary{cursor:pointer;list-style:none} #tip .asklist summary::-webkit-details-marker{display:none}
-#tip .asklist .hint{margin-left:6px;font-size:11px;color:var(--muted);text-decoration:underline}
-#tip .asklist details[open] .hint{display:none}
-#tip .asklist .more{margin:2px 0 6px;color:var(--muted);font-size:12px;line-height:1.4}
 .tbtn .asksn{margin-left:3px;padding:0 5px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bad);background:var(--bad-soft)}
 .tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
 @keyframes pulse{50%{opacity:.25}}
@@ -157,7 +153,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.7";
+  const VERSION = "0.14.8";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -351,7 +347,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       groups.forEach((as, th) => {
         const name = th.label || "Thread";
         w.append(el("p",{class:"askhead"}, safe(th.url) ? el("a",{href:th.url,target:"_blank",rel:"noopener",text:name}) : name, ":"));
-        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(askItem(th, a))); w.append(ul); });
+        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(inWork(th, a) ? el("li",{class:"inwork"}, workMark(), lean(a.text)) : el("li",{text:lean(a.text)}))); w.append(ul); });
       bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));
@@ -362,14 +358,6 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
     if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
-  }
-  // One waiting item; one with context ("more", from the thread's message) opens on click to show it.
-  function askItem(th, a){
-    const work = inWork(th, a), head = [work ? workMark() : null, lean(a.text)];
-    const more = typeof a.more === "string" ? a.more.trim() : "";
-    if (!more) return el("li",{class:work ? "inwork" : ""}, ...head);
-    const d = el("details",null, el("summary",null, ...head, el("span",{class:"hint",text:"more"})), el("p",{class:"more",text:more}));
-    return el("li",{class:work ? "inwork" : ""}, d);
   }
   function placeTip(card){
     const t = $("tip"), r = card.getBoundingClientRect(), W = innerWidth, H = innerHeight, g = 8;

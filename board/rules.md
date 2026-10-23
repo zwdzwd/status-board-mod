@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.7
+# Status Board rules (meta/instruction) — v0.14.8
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -68,12 +68,8 @@ does the per-turn bookkeeping by itself:
     at, done_at?}], from the line the thread's Claude ends each
     message to me with: a "Waiting on you:" heading and one bullet
     per item, each on its own line (or "Waiting on you: nothing").
-    An indented line under an item is its context ("more"): a
-    stand-alone note on the issue, what is decided so far, and what my
-    answer sets off, in two or three short, plain sentences. It stays with the item until a new line replaces
-    it, and shows when I click the item in the opened card.
     Each thread lists only what it needs from me for its own work,
-    never other threads' items or the card's blocker. Items are bare imperatives without my name. Only the
+    never other threads' items or the card's blocker. Items are bare imperatives without my name, each starting with its number in the thread (#1, #2, ...), kept while it is listed, so I can ask about it there. Only the
     thread changes the list: when I start a turn in the thread the
     mod marks its items as being worked on ("work": time; the board
     dims them with ⟳ while the thread thinks), and the thread's message

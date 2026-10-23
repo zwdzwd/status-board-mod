@@ -50,33 +50,13 @@ Write it as a heading with one bullet per item, each on its own line:
 
 ```
 Waiting on you:
-- Pick the Fig 2 layout
-- Approve the push
+- #3 Pick the Fig 2 layout
+- #4 Approve the push
 ```
 
-Under an item, add one indented line of context the first time you list it, and again whenever it
-changes. The board shows it when the item is clicked in the opened card. The mod keeps an item's
-context while you keep listing the item, so later messages can list it without the line.
-
-How to write the context:
-
-- It must stand alone. The user reads it later on the board, maybe while this thread works on
-  another issue. Take it from where the item came up, not from the latest exchange.
-- Say three things, in this order: the issue, what is done or decided so far, and what the
-  user's answer sets off.
-- Use simple, direct English. Write short sentences, two or three in all. Each sentence follows
-  from the one before.
-- Name things plainly: the file, figure, version or person. No "this", "it" or "the above"
-  without saying what it is.
-- No jargon, ids, paths or hedging. No lists, dashes or parentheses; periods and commas only.
-
-```
-Waiting on you:
-- Approve pushing 0.14.6
-  The board marked old thread buttons with a dashed edge. Version 0.14.6 removes that mark. Your approval publishes the board page, and nothing needs reinstalling.
-- Pick the Fig 2 layout
-  Fig 2 can show the four tumor types in one row or in a two by two grid. Both drafts are in the montage. Your choice sets the layout for the supplementary figures too.
-```
+Start each item with its number: #1, #2, and so on. A new item takes the next number this thread
+has not used yet, and an item keeps its number for as long as it is listed. The user can then ask
+about an item by its number ("what is #3 about?"); answer from where the item came up.
 
 When nothing waits on the user, write `Waiting on you: nothing`; this clears the list.
 
