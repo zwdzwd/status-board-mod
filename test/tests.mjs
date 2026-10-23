@@ -572,6 +572,14 @@ console.log('T8. numbered items keep their number on the board')
   const after = E.entry('methscope').asks
   ok(after.length === 1 && after[0].text === '#1 Approve the push' && after[0].id === before[1].id && after[0].at === before[1].at, 'a renumbered item is the same item') }
 
+console.log('T9. a session that ends mid-turn goes idle, not thinking')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  ok(E.entry('methscope').status === 'thinking', 'thinking during the turn')
+  await E.fire('session.end', { reason: 'other' }); await settle()
+  ok(E.entry('methscope').status === 'idle' && !!E.entry('methscope').ended, 'idle and stamped ended') }
+
 console.log('V. one version number across the five parts')
 { const fs = await import('node:fs'); const r = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')
   const v = r('VERSION').trim()

@@ -153,7 +153,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.9";
+  const VERSION = "0.14.10";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -279,6 +279,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const raw = t.status ? stKey(t.status) : "";
     const jobs = jobsOf(t);
     let S = raw ? {key:raw} : (jobs.length ? {key:"idle"} : null);
+    if (S && S.key === "thinking" && endedAfterAt(t)) S = {key:"idle"};   // the session ended mid-turn
     if (S && S.key === "idle" && openAsks(t).length) S = {key:"waiting"};   // still lists what it waits on
     if (S && S.key === "idle" && jobs.length) S = {key:"working"};
     return S;

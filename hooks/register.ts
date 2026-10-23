@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.9'
+const VERSION = '0.14.10'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -895,7 +895,8 @@ export const register: Register = on => {
     if (found) {
       const left = next.budget.remainingMs
       const ms = Math.min(Number.isFinite(left) ? left : 8000, 8000) - 300
-      if (ms > 500) { try { await limit($, setStatus($, '', true), ms, 'end stamp') } catch {} }
+      // A session that ends mid-turn is no longer thinking: it goes idle (or waiting, while it lists items).
+      if (ms > 500) { try { await limit($, setStatus($, turnActive ? 'idle' : '', true), ms, 'end stamp') } catch {} }
     }
     return next(e)
   })
