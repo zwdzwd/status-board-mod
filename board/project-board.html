@@ -153,7 +153,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.10";
+  const VERSION = "0.14.11";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -344,7 +344,9 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   function fillTip(p){
     const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
     // Waiting on you: each thread's open items, then (from threads that keep no list) waiting lines and the blocker.
-    const items = waitingItems(p), bl = items.length ? arr(p.blocker).concat(arr(p.blockers)) : asks(p).concat(arr(p.blocker), arr(p.blockers));
+    // When threads keep their own lists, those are the whole story (the card face shows them alone too);
+    // the card's hand-written blocker shows only on cards whose threads keep none.
+    const items = waitingItems(p), bl = items.length ? [] : asks(p).concat(arr(p.blocker), arr(p.blockers));
     if (items.length || bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"}));
       // Grouped by thread: the thread's name as a link, then its items as bullets.
       const groups = new Map(); items.forEach(({t: th, a}) => { if (!groups.has(th)) groups.set(th, []); groups.get(th).push(a); });
@@ -355,7 +357,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
       bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
     if (p.summary) t.append(el("p",{text:p.summary}));
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));
-    if (!p.summary && !nx.length && !bl.length) t.append(el("p",{class:"muted",text:"No update yet."}));
+    if (!p.summary && !nx.length && !bl.length && !items.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
     if (all.length){ const r = el("div",{class:"threads"}); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
     // Every running background job, by thread.

@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.10'
+const VERSION = '0.14.11'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -76,6 +76,8 @@ let replyText = ''                       // the turn's last message to the user 
 let projectTools = false                 // the session can start the project's threads: a project conversation
 // Problems to tell the user about, once each
 let lastError = ''                       // the last unexpected board failure, cleared by a success
+let refused = false                      // auto mode refuses this session's board writes (until /board-status)
+let firstWrite: Promise<void> = Promise.resolve()   // the session's first status write, awaited by the note
 let skipped = ''                         // a card matched by repository but held by another project
 let report = ''                          // what the user should hear about, if anything
 let reportedText = ''                    // what the model was already told to say
@@ -205,10 +207,12 @@ async function call($: Engine, args: Record<string, unknown>, ms = 15000): Promi
   if (r.missing) { noBoard = true; throw new Error('no ArtifactData tool in this session') }
   if (r.isError || r.deny !== undefined) {
     const text = String(r.deny ?? r.text ?? 'ArtifactData failed')
+    if (/gave no verdict|did not ask for/i.test(text)) refused = true
     if (!/^No document /i.test(text)) { lastError = `${String(args.action)} ${String(args.collection ?? '')}: ${text.slice(0, 160)}`; trace($, 'board error: ' + lastError) }
     throw new Error(text)
   }
   lastError = ''
+  if (args.action !== 'get' && args.action !== 'list' && args.action !== 'query') refused = false
   return String(r.text ?? '')
 }
 const isConflict = (err: unknown) => /version/i.test(msg(err))
@@ -712,7 +716,7 @@ async function init($: Engine): Promise<void> {
     if (found) {
       registeredHere = found.label === PLACEHOLDER
       if (!viaIndex) void indexWrite($, found)
-      void setStatus($, turnActive ? 'thinking' : 'idle', false)
+      firstWrite = setStatus($, turnActive ? 'thinking' : 'idle', false).catch(() => {})
       say($, `board: ${found.name} / ${found.label}`)
       void checkMail($, found.cardId)
     } else if (noBoard) {
@@ -734,7 +738,7 @@ function startInit($: Engine): void { initDone = false; initPromise = init($) }
 
 function reset(): void {
   found = null; removed = false; lastWrite = ''; registeredHere = false; coordinator = null; skipped = ''
-  report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0
+  report = ''; reportedText = ''; composedReport = ''; lastError = ''; initFailed = 0; refused = false
   unread = []; unmatchedWhy = ''; unmatchedTitle = ''; unmatchedPeers = []; unmatchedWritten = false; unmatchedChecked = false; seenList = null; jobsWritten = ''
   jobsNow = null; threadId = ''; priorIds = []; asksSaid = null; asksWork = false
 }
@@ -775,6 +779,8 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // /board-status runs the board-status skill: the thread's check-in write and its listing call.
+// While auto mode refuses the mod's writes, the thread reminds the user in its own message.
+const remind = () => refused ? ' The board refuses this session\'s writes until /board-status runs here, so it cannot show this thread now. Until /board-status has run in this session, end each "Waiting on you" list with the item "Run /board-status in this thread".' : ''
 const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name, each starting with its number in that list (#1, #2, ...), listing only what this thread itself needs (never other threads\' items or the card\'s); the mod puts that list on the board.'
 function noteBody(count: boolean, v: string): string {
   const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
@@ -782,7 +788,7 @@ function noteBody(count: boolean, v: string): string {
   if (noBoard) return `${v}: this chat has no ArtifactData tool, so the mod cannot show its status on the Status Board.${tell(count)}`
   if (coordinator) return `${v}: this is a project conversation${coordinator.cardId ? ` for the ${coordinator.name} card (id ${coordinator.cardId})` : ''}; the mod writes nothing here and adds no entry for it. ${sync}${IN_PLACE}`
   if (found && registeredHere) return `${v}: this chat is on the ${found.name} card (id ${found.cardId}) under the placeholder "${PLACEHOLDER}"; /board-status names it from the project's thread list. Do not invent a label. The mod writes this chat's status and its running background jobs by itself.${ASK_STATUS}${mailNote(found)}`
-  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself.${ASK_STATUS}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
+  if (found) return `${v}: this chat is thread "${found.label}" on the ${found.name} card (id ${found.cardId}). The mod writes its status (thinking / waiting_on_you / idle) and its running background jobs by itself.${ASK_STATUS}${remind()}${mailNote(found)} If you update the card, keep this entry's transcript (${sessionId})${remoteId ? ' and session (' + remoteId + ')' : ''} as they are.`
   if (removed) return `${v}: this chat's entry was taken off its card on the Status Board (usually because the thread was resolved). Leave the board alone.`
   const told = tell(count)
   if (!remoteId) return `${v}: this chat is not on the Status Board.${told}`
@@ -910,6 +916,7 @@ export const register: Register = on => {
     // The note may be composed once for the whole session: give the lookup a few seconds first, so
     // it says what this chat needs rather than "looking up".
     if (!initDone) { try { await limit($, initPromise, 4000, 'lookup') } catch {} }
+    try { await limit($, firstWrite, 3000, 'first write') } catch {}   // whether the board takes this session's writes
     const text = boardNote(!traits.includes('analysis'))
     return { sections: [...r.sections.filter(s => s.id !== NOTE_ID), { id: NOTE_ID, text, scope: 'session' as const }] }
   })

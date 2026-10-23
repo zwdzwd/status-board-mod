@@ -580,6 +580,15 @@ console.log('T9. a session that ends mid-turn goes idle, not thinking')
   await E.fire('session.end', { reason: 'other' }); await settle()
   ok(E.entry('methscope').status === 'idle' && !!E.entry('methscope').ended, 'idle and stamped ended') }
 
+console.log('T10. while the board refuses the session\'s writes, the note asks the thread to remind the user')
+{ const E = await env({ db: card([{ label: 'Writing', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
+  E.state.denyWrites = true
+  await E.fire('session.start', {}); await settle()
+  ok(/Run \/board-status in this thread/.test(await E.note()), 'the reminder shows while writes are refused')
+  E.state.denyWrites = false
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  ok(!/Run \/board-status in this thread/.test(await E.note()), 'it goes once a write goes through') }
+
 console.log('V. one version number across the five parts')
 { const fs = await import('node:fs'); const r = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')
   const v = r('VERSION').trim()
