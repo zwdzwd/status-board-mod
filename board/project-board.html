@@ -153,7 +153,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.8";
+  const VERSION = "0.14.9";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -327,9 +327,12 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   let tipTimer = null, tipFor = null;
   // What the chats waiting on you ask for, as "Label: request" (the plugin writes it with the status).
   // Every open item a card's threads wait on you for, newest first, as {t, a}.
+  // Threads with the newest item come first; each thread's items keep the order of its list (#1, #2, ...).
   function waitingItems(p){
-    return arr(p.threads).filter(Boolean).flatMap(t => openAsks(t).map(a => ({t, a})))
-      .sort((x, y) => String(y.a.at || "").localeCompare(String(x.a.at || "")));
+    const newest = t => openAsks(t).map(a => String(a.at || "")).sort().pop() || "";
+    return arr(p.threads).filter(Boolean).filter(t => openAsks(t).length)
+      .sort((x, y) => newest(y).localeCompare(newest(x)))
+      .flatMap(t => openAsks(t).map(a => ({t, a})));
   }
   function asks(p){
     // Every thread waiting on you is named, with its line or, from an older plugin without one, a pointer to the thread.

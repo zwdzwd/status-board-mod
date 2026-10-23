@@ -50,13 +50,13 @@ Write it as a heading with one bullet per item, each on its own line:
 
 ```
 Waiting on you:
-- #3 Pick the Fig 2 layout
-- #4 Approve the push
+- #1 Pick the Fig 2 layout
+- #2 Approve the push
 ```
 
-Start each item with its number: #1, #2, and so on. A new item takes the next number this thread
-has not used yet, and an item keeps its number for as long as it is listed. The user can then ask
-about an item by its number ("what is #3 about?"); answer from where the item came up.
+Number the items #1, #2, and so on, starting from #1 in every message. The user can then ask about
+an item by its number ("what is #2 about?"), meaning your latest list; answer from where the item
+came up.
 
 When nothing waits on the user, write `Waiting on you: nothing`; this clears the list.
 

@@ -565,7 +565,12 @@ console.log('T8. numbered items keep their number on the board')
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', { text: 'hi' }); await settle()
   await E.fire('turn.complete', { answer: 'Done.\n\nWaiting on you:\n- #3 Pick the Fig 2 layout\n- #4 Approve the push', reason: 'answer' }); await settle()
-  ok(E.entry('methscope').asks.map(x => x.text).join('|') === '#3 Pick the Fig 2 layout|#4 Approve the push', 'numbers kept') }
+  const before = E.entry('methscope').asks
+  ok(before.map(x => x.text).join('|') === '#3 Pick the Fig 2 layout|#4 Approve the push', 'numbers kept')
+  await E.fire('turn.start', { text: 'hi' }); await settle()
+  await E.fire('turn.complete', { answer: 'Waiting on you:\n- #1 Approve the push', reason: 'answer' }); await settle()
+  const after = E.entry('methscope').asks
+  ok(after.length === 1 && after[0].text === '#1 Approve the push' && after[0].id === before[1].id && after[0].at === before[1].at, 'a renumbered item is the same item') }
 
 console.log('V. one version number across the five parts')
 { const fs = await import('node:fs'); const r = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8')

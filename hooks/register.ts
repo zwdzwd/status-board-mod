@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.8'
+const VERSION = '0.14.9'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -355,7 +355,7 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
       // Items other threads on this card already list, and the card's own blocker: a thread that read the
       // board must not repeat them.
       const others = new Set([...threadsOf(card).filter(t => t && !isMine(t, ids)).flatMap(t => Array.isArray(t.asks) ? t.asks.map(a => a && a.text) : []),
-        ...([] as unknown[]).concat(card.data.blocker ?? [], card.data.blockers ?? [])].map(x => lean(String(x || '')).toLowerCase()).filter(Boolean))
+        ...([] as unknown[]).concat(card.data.blocker ?? [], card.data.blockers ?? [])].map(x => askKey(lean(String(x || '')))).filter(Boolean))
       let th = threadsOf(card).map(t => {
         if (!isMine(t, ids)) return t
         const n: Thread = { ...t }
@@ -662,10 +662,13 @@ function fromUser(text: string): boolean {
 // The entry's list as the thread last said it: items it still lists keep their id and time, new ones
 // are added, and ones it no longer lists are gone. Items another thread on the card already lists are
 // left out, since each thread's list shows under that thread.
+// An item's words without its number ("#2 Pick the layout" -> "pick the layout"): threads number
+// their list afresh each message, so the same item may come back under another number.
+const askKey = (s: string) => String(s || '').replace(/^\s*#\d+[.:)]?\s+/, '').toLowerCase()
 function mergedAsks(cur: Ask[] | undefined, others: Set<string> = new Set()): Ask[] {
   const at = now(), old = (Array.isArray(cur) ? cur : []).filter(a => a && a.id && a.text && !(a as { done_at?: string }).done_at)
-  return (asksSaid || []).filter(text => !others.has(text.toLowerCase())).map((text, k) => {
-    const kept = old.find(a => a.text.toLowerCase() === text.toLowerCase())
+  return (asksSaid || []).filter(text => !others.has(askKey(text))).map((text, k) => {
+    const kept = old.find(a => askKey(a.text) === askKey(text))
     return kept ? { id: kept.id, text, at: kept.at } : { id: `${(remoteId || sessionId).slice(-6)}-${Date.now().toString(36)}${k}`, text, at }
   })
 }
@@ -772,7 +775,7 @@ function boardNote(count: boolean): string {
   return noteBody(count, v) + WHERE()
 }
 // /board-status runs the board-status skill: the thread's check-in write and its listing call.
-const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name, each starting with its own number (#1, #2, ...; a new item takes the next unused number and keeps it), listing only what this thread itself needs (never other threads\' items or the card\'s); the mod puts that list on the board.'
+const ASK_STATUS = ' At the start of each fresh session the user sends /board-status: load the board-status skill and follow it here; never start a thread for it. End each message to the user with a "Waiting on you:" heading and one bullet per item (or "Waiting on you: nothing"), as bare imperatives without the user\'s name, each starting with its number in that list (#1, #2, ...), listing only what this thread itself needs (never other threads\' items or the card\'s); the mod puts that list on the board.'
 function noteBody(count: boolean, v: string): string {
   const sync = 'The card\'s thread list is synced when the user sends /board-status in a thread.'
   if (noBoard && coordinator) return `${v}: this project conversation has no ArtifactData tool, so the mod writes nothing to the Status Board from here; that is expected and needs no mention. ${sync}${IN_PLACE}`
