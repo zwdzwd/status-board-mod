@@ -35,6 +35,10 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
    leave out "url" when you do not know the project's id. The mod finds the card from that entry and,
    at the end of the turn, adds the project's other threads, linked the same way. If there is no
    such card, say so; the board lists this thread under "not on any card".
+   Then refresh the card's own lines, by what this thread knows: if the summary or the next step is
+   out of date, rewrite it (one short line each), and clear a hand-written "blocker" that the
+   threads' own waiting lists now cover (set it to ""). Leave lines you cannot judge as they are,
+   and touch nothing else on the card: one `update` of those fields, pinned to the card's version.
 4. **Check this project's mail.** Query collection "messages" with
    `{"where": [["to", "==", "<this card's id>"], ["read_at", "==", ""]]}`. If notes came, tell the user
    in a line each who sent it and what it asks, then mark each read: `update` it with

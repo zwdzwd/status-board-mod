@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.11'
+const VERSION = '0.14.12'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.

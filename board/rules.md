@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.11
+# Status Board rules (meta/instruction) — v0.14.12
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -77,6 +77,10 @@ does the per-turn bookkeeping by itself:
     status writes. The board counts open items on the thread's button,
     puts them first on the card, and lists them in the opened card.
     Leave it as the mod wrote it;
+  - /board-status also refreshes the card's own lines: the thread
+    rewrites a summary or next step that is out of date by what it
+    knows, and clears a hand-written blocker the threads' waiting
+    lists now cover;
   - in auto mode the mod's board writes need one approval that only
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
