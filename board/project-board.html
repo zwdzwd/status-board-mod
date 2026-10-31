@@ -77,6 +77,8 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 .tbtn.t-working{color:var(--ok);background:var(--ok-soft)} .tbtn.t-working:hover{border-color:var(--ok)}
 .tbtn.t-waiting{color:var(--bad);background:var(--bad-soft)} .tbtn.t-waiting:hover{border-color:var(--bad)}
 .tbtn.t-idle{color:var(--idle);background:var(--idle-soft)} .tbtn.t-idle:hover{border-color:var(--idle)}
+/* A thread /board-status last found offline or stopped: dimmed, dashed, with where and since when in its tooltip. */
+.tbtn.off{opacity:.55;border:1px dashed currentColor}
 .tbtn .tdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px;box-sizing:border-box}
 .tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
 .tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
@@ -153,7 +155,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   // Cards written before the switch to Claude Code's buckets keep rendering.
   const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
   const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.14";
+  const VERSION = "0.14.15";
   let boardLink = "";
   function skillPrompt(link){
     return [
@@ -391,11 +393,13 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
     const waitingN = openAsks(t).length;
     const prog = waitingN ? el("span",{class:"asksn",text:String(waitingN)}) : null;
+    const c = t.conn && typeof t.conn === "object" ? t.conn : null, off = !!c && (c.state === "offline" || c.state === "stopped");
+    const connLine = c && c.state ? "\nConnection: " + c.state + (c.where ? ", " + c.where : "") + (c.since ? ", since " + ago(c.since) : "") + (c.checked ? " (checked " + ago(c.checked) + ")" : "") : "";
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
-    if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : ""),title:"Link not set yet. " + when,text:(t.label||"Thread")});
+    if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : "") + (off ? " off" : ""),title:"Link not set yet. " + when + connLine,text:(t.label||"Thread")});
     const state = tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") : "";
-    const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "");
-    return el("a",{class:"tbtn" + (tk ? " t-" + tk : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), prog, light);
+    const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "") + connLine;
+    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (off ? " off" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "") + (off ? ", " + c.state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), prog, light);
   }
 
   function render(){
