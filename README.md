@@ -23,15 +23,13 @@ Five parts, one version number (`VERSION`; the same string is in
 - **The board-status skill** (`skills/board-status/`): `/board-status`, sent at the start of each
   fresh session, makes the thread write once to the board (in auto mode that lets the plugin write
   for the rest of the session), list the project's threads so the plugin can place the thread and
-  sync the card's thread list, and report what the card shows. `/board-info` shows what the
+  sync the card's thread list, and report what the card shows, ending with a table of the project's
+  threads (connection, state, what each waits on the user for). `/board-info` shows what the
   plugin itself sees.
 - **The messaging skill** (`skills/status-board-messaging/`): ships with the plugin, so every
   session that has the plugin can send a note to another project or check its own mail through
   the board's "messages" collection. The plugin's per-turn note shows a thread how many notes
   wait for its project.
-- **The summary skill** (`skills/summary/`): `/summary` prints one table in the conversation, a row
-  per thread of the project, with its connection (online, offline, cloud, stopped), its state and
-  what it waits on the user for. It runs only when the user sends it and writes nothing.
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
   `user`). After a change, publish it to that same URL.
