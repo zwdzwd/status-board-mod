@@ -303,13 +303,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
     if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
     c.append(top);
-    // Body: summary / next / blockers, then the thread buttons along the bottom (at most 4, then "… +N").
+    // Body: summary / next / blockers, then every thread's button along the bottom.
     const body = el("div",{class:"body"}); c.append(body);
     const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
     const r = el("div",{class:"threads"});
-    const shown = all.length > 4 ? all.slice(0, 3) : all;
-    shown.forEach(t => r.append(threadButton(t)));
-    if (all.length > 4) r.append(el("span",{class:"tbtn more",title:all.slice(3).map(t => t.label||"Thread").join(", ") + " — hover the card for all " + all.length,text:"\u2026 +" + (all.length - 3)}));
+    all.forEach(t => r.append(threadButton(t)));
     if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
     const txt = el("div",{class:"text"}); body.append(txt);
     // What waits on you comes first, since it matters most: the open items the threads keep (up to
