@@ -71,6 +71,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
 #tip .threads{gap:4px;margin-top:2px;pointer-events:auto}
 .tbtn{font-size:11px;font-weight:500;line-height:1.3;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:3px;padding:1px 5px;text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .tbtn:hover{border-color:var(--accent)}
+.tbtn.mtg{color:var(--fg);background:transparent;border-color:var(--line)} .tbtn.mtg:hover{border-color:var(--accent);color:var(--accent)}
 .tbtn.more{color:var(--muted);background:transparent;border-color:var(--line);cursor:default}
 /* Thread buttons take their thread's own status color; a thread with no status stays neutral. */
 .tbtn.t-thinking{color:var(--think);background:var(--think-soft)} .tbtn.t-thinking:hover{border-color:var(--think)}
@@ -307,6 +308,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const body = el("div",{class:"body"}); c.append(body);
     const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
     const r = el("div",{class:"threads"});
+    const mtg = montageButton(p); if (mtg) r.append(mtg);
     all.forEach(t => r.append(threadButton(t)));
     if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
     const txt = el("div",{class:"text"}); body.append(txt);
@@ -359,7 +361,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));
     if (!p.summary && !nx.length && !bl.length && !items.length) t.append(el("p",{class:"muted",text:"No update yet."}));
     const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
-    if (all.length){ const r = el("div",{class:"threads"}); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
+    if (all.length){ const r = el("div",{class:"threads"}); const mtg = montageButton(p); if (mtg) r.append(mtg); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
     // Every running background job, by thread.
     const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
     if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
@@ -386,6 +388,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
   document.addEventListener("click", e => { if (!e.target.closest(".card, #tip")) hideTip(); });
   addEventListener("resize", hideTip);
 
+  // The project's figure montage (card field "montage", a claude.ai artifact link), shown before the threads.
+  function montageButton(p){
+    const u = typeof p.montage === "string" ? p.montage.trim() : "";
+    return /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+$/.test(u) ? el("a",{class:"tbtn mtg",href:u,target:"_blank",rel:"noopener",title:"Open the figure montage",text:"\u25a6 Montage"}) : null;
+  }
   function threadButton(t){
     const s = threadState(t), tk = s ? s.key : "", jobs = jobsOf(t);
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
