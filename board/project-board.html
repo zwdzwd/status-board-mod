@@ -391,8 +391,11 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-off
     const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
     const waitingN = openAsks(t).length;
     const prog = waitingN ? el("span",{class:"asksn",text:String(waitingN)}) : null;
-    const c = t.conn && typeof t.conn === "object" ? t.conn : null, off = !!c && (c.state === "offline" || c.state === "stopped");
-    const connLine = c && c.state ? "\nConnection: " + c.state + (c.where ? ", " + c.where : "") + (c.since ? ", since " + ago(c.since) : "") + (c.checked ? " (checked " + ago(c.checked) + ")" : "") : "";
+    // The connection /board-status last saw. A thread that has reported since then was connected to do so, so it is not dimmed.
+    const c = t.conn && typeof t.conn === "object" ? t.conn : null;
+    const since = c && t.at && c.checked && Date.parse(t.at) > Date.parse(c.checked);
+    const off = !!c && !since && (c.state === "offline" || c.state === "stopped");
+    const connLine = c && c.state ? "\nConnection: " + c.state + (c.where ? ", " + c.where : "") + (c.since ? ", since " + ago(c.since) : "") + (c.checked ? " (checked " + ago(c.checked) + ")" : "") + (since && c.state !== "online" ? "; active since, so connected" : "") : "";
     const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
     if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : "") + (off ? " off" : ""),title:"Link not set yet. " + when + connLine,text:(t.label||"Thread")});
     const state = tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") : "";
