@@ -127,12 +127,8 @@ it finishes.
     it). The mod writes each thread's entry; /board-status in a thread
     makes the list match the project's open threads and sets each
     entry's conn ({state: online|offline|cloud|stopped, where?, since?,
-    checked}), the thread's connection as of that /board-status.
-  - montage: the project's figure montage, its claude.ai artifact
-    link, or absent when the project has none. The board shows it as a
-    Montage button beside the threads. It is the only link a card
-    carries: no other artifact, repo, Zenodo or other links anywhere on
-    the card; remove a links field if present.
+    checked}), the thread's connection as of that /board-status. No montage, artifact, repo, Zenodo or other links
+    anywhere on the card: remove a links or montage field if present.
   - coordinator: a legacy field from older mods; leave it as it is.
   - category: paper | software | misc (grants, talks, personal work and
     anything else; older cards may say grant, talk or personal, which
