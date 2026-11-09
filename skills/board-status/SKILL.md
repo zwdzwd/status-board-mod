@@ -48,7 +48,7 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
    whose state is done), work out its connection:
    call read_thread for each other thread with limit 10; the newest message whose body is JSON with
    "kind" thread_session or remote_control_session gives it: phase "offline" or "reconnect" is
-   offline, "online" is online, with its machine_name, machine_folder and the message's time. With no
+   offline, "online", "connected" or "joined" is online, with its machine_name, machine_folder and the message's time. With no
    such message the thread runs in the cloud: "cloud", or "stopped" when its state is stopped. This
    thread is online. Then write it onto the card: one `update` of "threads", pinned to the card's
    version, the same entries with only a "conn" field set on each
