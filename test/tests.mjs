@@ -473,6 +473,16 @@ console.log('Y. the board address comes from the board skill (or its old name), 
   ok(E.entry('methscope') && (await E.note()).includes(BOARD), 'no skill on disk: the built-in board') }
 
 console.log('T. the thread\'s "Waiting on you" line is the entry\'s asks; only the thread changes it; written only with status writes')
+{ const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__post_message', input: { text: 'Up.\n\nWaiting on you:\n- #1 Pick the title' } }, { result: 'sent' }); await settle()
+  await E.fire('turn.complete', { answer: '', reason: 'answer' }); await settle()
+  ok((E.entry('methscope').asks || []).map(x => x.text).join('|') === '#1 Pick the title', 'post_message (text in input) sets the list: ' + JSON.stringify(E.entry('methscope').asks))
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__post_message', input: { text: 'Done.\n\nWaiting on you: nothing' } }, { result: 'sent' }); await settle()
+  await E.fire('turn.complete', { answer: '', reason: 'answer' }); await settle()
+  ok(!E.entry('methscope').asks && E.entry('methscope').status === 'idle', 'post_message "nothing" clears the list') }
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle', todo: { title: 'old' } }]) })
   await E.fire('session.start', {}); await settle()
   await E.fire('turn.start', {}); await settle()

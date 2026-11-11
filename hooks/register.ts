@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.14.17'
+const VERSION = '0.14.18'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -927,9 +927,10 @@ export const register: Register = on => {
   // at once to place a chat that is not on a card yet.
   on('tool.call', async ($, e, next) => {
     const tool = String(e.tool || '')
-    // A message the thread sends the user (a project thread's reply tool): its "Waiting on you" line.
-    if (e.agentId === undefined && /(^|__)reply$/.test(tool)) {
-      replyText = String((e as unknown as Record<string, unknown>).text ?? '')
+    // A message the thread sends the user (a project thread's reply or post_message tool): its "Waiting on you" line.
+    if (e.agentId === undefined && /(^|__)(reply|post_message)$/.test(tool)) {
+      const ev = e as unknown as Record<string, unknown>, input = (ev.input && typeof ev.input === 'object' ? ev.input : {}) as Record<string, unknown>
+      replyText = String(ev.text ?? input.text ?? '')
       const said = waitingSaid(replyText)
       if (said) asksSaid = said
       return next(e)
