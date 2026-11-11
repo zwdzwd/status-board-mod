@@ -59,7 +59,12 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
    "checked": "<ISO now>"}`; leave out "where" and "since" when unknown). If the write is refused
    because the card changed, re-read the card and redo it once. The board dims an offline thread's
    button and names where and since when in its tooltip.
-   End the reply with the same as a table, one row per thread, newest activity first:
+   Then build the same as a table, one row per thread, newest activity first, and send it to the
+   project chat instead of printing it in this thread: in a project thread, pass it to the project's
+   coordinator (message_coordinator, or send_message to session "@parent" with visibility
+   "posted_to_shared_channel" in a Remote Control thread) and ask it to post the table in the project
+   chat as it is. Your reply in this thread then says in one line that the table went to the project
+   chat. Only outside a project, with no coordinator to send to, end the reply with the table:
 
    | Thread | Connection | State | Waiting on you |
    |---|---|---|---|
