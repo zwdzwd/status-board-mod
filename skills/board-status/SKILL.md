@@ -51,7 +51,10 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
    offline, "online", "connected" or "joined" is online, with its machine_name, machine_folder and the message's time. With no
    such message the thread runs in the cloud: "cloud", or "stopped" when its state is stopped. This
    thread is online. Then write it onto the card: one `update` of "threads", pinned to the card's
-   version, the same entries with only a "conn" field set on each
+   version, the same entries with only a "conn" field set on each, and, when this thread's own entry
+   has no "url", that set too: `https://claude.ai/code/project/<this project's id>?thread=<this
+   thread's id>`, the project's id (chan_…) from your system prompt. The mod copies the project part
+   of that link to build the other threads' links, so a card with no link yet gets them all from it
    (`{"state": "online|offline|cloud|stopped", "where": "<machine> <folder>", "since": "<ISO>",
    "checked": "<ISO now>"}`; leave out "where" and "since" when unknown). If the write is refused
    because the card changed, re-read the card and redo it once. The board dims an offline thread's
