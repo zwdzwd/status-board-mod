@@ -29,7 +29,7 @@ h2::after{content:"";flex:1;border-top:1px solid var(--line)}
 .tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:6px;box-shadow:var(--shadow);padding:5px 7px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;transition:box-shadow .15s}
 .tile:hover{box-shadow:0 2px 8px rgba(23,33,42,.12)}
 .tile.hot{border-left-color:var(--red);background:var(--red-soft)}
-.name{font-weight:700;font-size:12.5px;color:var(--fg);text-decoration:none;margin-right:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.name{flex-basis:100%;font-weight:700;font-size:12.5px;color:var(--fg);text-decoration:none;margin:0 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 a.name:hover{text-decoration:underline}
 .t{font-size:11px;line-height:1.4;padding:0 8px;border-radius:999px;background:var(--chip);color:var(--fg);text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .t:hover{outline:1px solid var(--muted);outline-offset:-1px}
