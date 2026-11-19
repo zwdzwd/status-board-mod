@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.14.19
+# Status Board rules (meta/instruction) — v0.15.0
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -77,10 +77,6 @@ does the per-turn bookkeeping by itself:
     status writes. The board counts open items on the thread's button,
     puts them first on the card, and lists them in the opened card.
     Leave it as the mod wrote it;
-  - /board-status also refreshes the card's own lines: the thread
-    rewrites a summary or next step that is out of date by what it
-    knows, and clears a hand-written blocker the threads' waiting
-    lists now cover;
   - in auto mode the mod's board writes need one approval that only
     the thread's own write earns: the check-in write of /board-status
     (collection "checkins", doc_id = the thread's cmsg_ id), sent at
@@ -99,11 +95,11 @@ it finishes.
 - Set the card's repo field once to this repository's owner/name (from
   git remote). The mod uses it only as a tie-break, for a card that
   holds no other project's threads.
-- Update the rest of the card at the end of a session where something
-  real changed (result, decision, new blocker, finished step), or when
-  I say "update the board". Skip it when nothing changed.
-- Read my card, then write ONLY my card, pinned to the version read
-  (on a version mismatch, re-read and write once more). Keep it short:
+- The board shows only each card's name and its threads as links, red when a
+  thread waits on me. Do not spend turns updating summary, next or blocker:
+  the board no longer shows them. Write a card only to create it, or when I ask
+  ("update the board"): read it, then write ONLY my card, pinned to the version
+  read (on a version mismatch, re-read and write once more). Fields:
   - name: project name
   - repo: owner/name of the git remote
   - status: the card's own fallback, same values as a thread's
