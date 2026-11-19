@@ -1,473 +1,172 @@
 <title>Status Board</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400&display=swap">
 <style>
-/* Layout: foldable sections by kind of work (Analysis, Software, Misc), each a grid of fixed-size cards in a stable order (priority, then name). Each card: name, one line of where it stands, next step, blocker, and one button per thread. Thread colors come from the status each thread writes to the card; the card's own status follows its threads. */
+/* Compact board: one small tile per project in a stable spot (section, priority, name), each tile a row of
+   thread links. Red means the thread waits on you; every other thread is neutral, with a small pulsing dot
+   while Claude is on it. Hover a red link to see what it waits on. */
 :root{
-  --bg:#f3f5f6; --panel:#ffffff; --fg:#14202a; --muted:#5b6b78; --line:#d9e0e5; --accent:#0f6e7a; --accent-soft:#e1f0f1;
-  --think:#2563a8; --think-soft:#e3ecf8; --ok:#2f8a4e; --ok-soft:#e3f3e8; --warn:#b7791f; --warn-soft:#fbf0dc; --bad:#c2410c; --bad-soft:#fde8dd; --idle:#7b8794; --idle-soft:#eceff2;
-  --f-display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
-  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
-  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --card-h:118px; --radius:8px; --shadow:0 1px 2px rgba(20,32,42,.06),0 2px 8px rgba(20,32,42,.04); /* every card is this tall; longer text is clipped, full text in the hover card */
+  --bg:#f4f5f6; --panel:#fff; --fg:#17212a; --muted:#6b7884; --line:#dde2e6; --chip:#eceff2;
+  --red:#c42b1c; --red-fg:#fff; --red-soft:#fde7e4; --dot:#2f7fd0;
+  --f:system-ui,-apple-system,"Segoe UI",sans-serif; --shadow:0 1px 2px rgba(23,33,42,.06);
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0f161b; --panel:#17212a; --fg:#e4ebef; --muted:#93a3ae; --line:#2a3743; --accent:#4fb8c4; --accent-soft:#163238;
-  --think:#6ea8f0; --think-soft:#16263a; --ok:#5cc47f; --ok-soft:#163223; --warn:#e3a94a; --warn-soft:#352a14; --bad:#f07a45; --bad-soft:#3a1e12; --idle:#8d9aa6; --idle-soft:#222d36; color-scheme:dark}}
+  --bg:#11171c; --panel:#192229; --fg:#e3e9ee; --muted:#8e9ba6; --line:#2b3740; --chip:#232e37;
+  --red:#e5533f; --red-fg:#fff; --red-soft:#3a1a15; --dot:#6aaaf0; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#0f161b; --panel:#17212a; --fg:#e4ebef; --muted:#93a3ae; --line:#2a3743; --accent:#4fb8c4; --accent-soft:#163238;
-  --think:#6ea8f0; --think-soft:#16263a; --ok:#5cc47f; --ok-soft:#163223; --warn:#e3a94a; --warn-soft:#352a14; --bad:#f07a45; --bad-soft:#3a1e12; --idle:#8d9aa6; --idle-soft:#222d36; color-scheme:dark}
-body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:13px;line-height:1.45}
-.wrap{margin:0 auto;max-width:1440px;padding-block:14px 28px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
-header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;padding-bottom:12px;border-bottom:1px solid var(--line)}
-.ttl{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
-header .hbtns{flex-basis:100%;display:flex;align-items:center;justify-content:flex-start;gap:8px;flex-wrap:wrap}
-.howto{margin:0;font-size:12px;color:var(--muted);text-align:left}
-.howto b{color:var(--fg);font-weight:600}
-.howto code{font-family:var(--f-mono);font-size:11.5px;background:var(--accent-soft);color:var(--accent);padding:0 4px;border-radius:3px}
-.howto a,.linkbtn{color:var(--accent)}
-.linkbtn{font:inherit;background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
-.linkbtn:disabled{color:var(--muted);text-decoration:none;cursor:default}
-.hbtns{display:flex;gap:6px;flex-wrap:wrap}
-h1{font-family:var(--f-display);font-weight:700;font-size:clamp(22px,3vw,28px);line-height:1.1;margin:0;letter-spacing:-.01em}
-.sub{color:var(--muted);font-size:12px;margin:0}
-.btn{font:inherit;font-size:13px;font-weight:500;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:8px;padding:5px 10px;cursor:pointer;text-decoration:none;white-space:nowrap}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn.go{background:var(--accent);border-color:var(--accent);color:var(--panel)}
-.btn.go:hover{filter:brightness(1.08);color:var(--panel)}
-a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--idle)}
-.s-thinking .dot{background:var(--think)} .s-working .dot{background:var(--ok)} .s-waiting .dot{background:var(--bad)}
-.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--muted);margin-left:auto}
-.legend>span{display:inline-flex;align-items:center;gap:6px}
-#board{display:flex;flex-direction:column;gap:30px}
-.section{display:flex;flex-direction:column;gap:10px}
-.section>.grid,.section>.sec-empty{margin-top:10px}
-.sec-head{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);padding-bottom:6px;cursor:pointer;list-style:none;user-select:none}
-.sec-head::-webkit-details-marker{display:none}
-.sec-head::before{content:"";width:0;height:0;border-left:6px solid var(--muted);border-top:5px solid transparent;border-bottom:5px solid transparent;align-self:center;transition:transform .15s}
-.section[open]>.sec-head::before{transform:rotate(90deg)}
-.sec-head:hover h2{color:var(--accent)}
-.sec-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.sec-head .sum-dots{display:inline-flex;gap:8px;margin-left:auto;font-size:12px;color:var(--muted)}
-.sec-head .sum-dots span{display:inline-flex;align-items:center;gap:4px}
-.sec-head h2{font-family:var(--f-display);font-weight:700;font-size:18px;margin:0}
-.sec-head .n{font-family:var(--f-mono);font-size:11px;color:var(--muted);background:var(--idle-soft);border-radius:999px;padding:0 7px}
-.sec-empty{font-size:13px;color:var(--muted);margin:0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));grid-auto-rows:minmax(var(--card-h),auto);gap:12px;align-items:stretch}
-.card{position:relative;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:9px 11px 9px 10px;display:flex;flex-direction:column;gap:4px;cursor:pointer;overflow:hidden;min-width:0;min-height:var(--card-h);box-sizing:border-box;transition:border-color .15s,box-shadow .15s,transform .15s}
-.card:hover{box-shadow:0 2px 4px rgba(20,32,42,.08),0 8px 20px rgba(20,32,42,.08);transform:translateY(-1px)}
-.card.k-waiting{border-left-color:var(--bad)} .card.k-thinking{border-left-color:var(--think)} .card.k-working{border-left-color:var(--ok)}
-@media (prefers-reduced-motion: reduce){.card{transition:none}.card:hover{transform:none}}
-.top{display:flex;align-items:baseline;gap:6px}
-.top h3{font-family:var(--f-display);font-weight:700;font-size:15px;line-height:1.2;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.line{margin:0;font-size:12px;line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;flex-shrink:0}
-.line.sum{-webkit-line-clamp:2}
-.line b{font-weight:700;font-size:10px;color:var(--muted);margin-right:4px}
-.line.next,.line.next b{color:var(--ok)}
-.line.bad,.line.bad b{color:var(--bad)}
-.card.open{background:var(--idle-soft);border-color:var(--accent)}
-.body{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
-.threads{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:6px}
-.text{min-width:0;display:flex;flex-direction:column;gap:2px}
-#tip .threads{gap:4px;margin-top:2px;pointer-events:auto}
-.tbtn{font-size:11.5px;font-weight:500;line-height:1.35;color:var(--accent);background:var(--accent-soft);border:1px solid transparent;border-radius:999px;padding:2px 9px;text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.tbtn:hover{border-color:var(--accent)}
-.tbtn.proj-link{color:var(--fg);background:transparent;border-color:var(--line)} .tbtn.proj-link:hover{border-color:var(--accent);color:var(--accent)}
-.tbtn.more{color:var(--muted);background:transparent;border-color:var(--line);cursor:default}
-/* Thread buttons take their thread's own status color; a thread with no status stays neutral. */
-.tbtn.t-thinking{color:var(--think);background:var(--think-soft)} .tbtn.t-thinking:hover{border-color:var(--think)}
-.tbtn.t-working{color:var(--ok);background:var(--ok-soft)} .tbtn.t-working:hover{border-color:var(--ok)}
-.tbtn.t-waiting{color:var(--bad);background:var(--bad-soft)} .tbtn.t-waiting:hover{border-color:var(--bad)}
-.tbtn.t-idle{color:var(--idle);background:var(--idle-soft)} .tbtn.t-idle:hover{border-color:var(--idle)}
-/* A thread /board-status last found offline or stopped: dimmed, dashed, with where and since when in its tooltip. */
-.tbtn.off{opacity:.55;border:1px dashed currentColor}
-.tbtn .tdot{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:4px;vertical-align:1px;box-sizing:border-box}
-.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:pulse 1.6s ease-in-out infinite}
-.tbtn .jobs{display:inline-flex;align-items:center;gap:3px;margin-left:2px;padding:0 6px;border-radius:999px;font-size:11px;color:var(--ok);background:var(--ok-soft)}
-#tip .askhead{margin:3px 0 0;font-weight:600} #tip .askhead a{color:inherit}
-#tip .asklist{margin:0 0 2px;padding-left:18px} #tip .asklist li{margin:0}
-.inwork{opacity:.6} .inwork .wk{margin-right:4px}
-.tbtn .asksn{margin-left:3px;padding:0 5px;border-radius:999px;font-size:10px;font-weight:600;color:var(--bad);background:var(--bad-soft)}
-.tbtn .jobs::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--ok)}
-@keyframes pulse{50%{opacity:.25}}
-@media (prefers-reduced-motion: reduce){.tbtn.t-thinking .tdot,.tbtn.t-working .tdot{animation:none}}
-.meta{font-family:var(--f-mono);font-size:10px;color:var(--muted);flex-shrink:0;white-space:nowrap}
-.muted{color:var(--muted)}
-.empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:24px;color:var(--muted);text-align:center}
-/* Hover card: the full text of a card, shown next to it. */
-#tip{position:fixed;z-index:30;pointer-events:auto;width:min(380px,calc(100vw - 24px));background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:13px;line-height:1.5;display:flex;flex-direction:column;gap:8px}
-#tip h4{font-family:var(--f-display);font-size:16px;margin:0}
-#tip p{margin:0;overflow-wrap:anywhere}
-#tip b{display:block;font-weight:600;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-#tip .bad,#tip .bad b{color:var(--bad)} #tip .next,#tip .next b{color:var(--ok)}
-#tip .meta{margin:0}
-.skillbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px}
-.skillbox pre{margin:0;font-family:var(--f-mono);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;user-select:all}
-.unmatched{border:1px solid var(--bad);background:var(--bad-soft);color:var(--bad);border-radius:6px;padding:6px 10px;font-size:12px;display:flex;flex-direction:column;gap:2px}
-.unmatched b{font-weight:600}
-.notes{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:2px 6px;max-height:45vh;overflow:auto;font-size:11.5px;line-height:1.3}
-.chain{border-left:2px solid var(--line);padding-left:5px;margin:2px 0}
-.chain>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
-.chain>summary::-webkit-details-marker{display:none}
-.chain>summary::before{content:"▸";color:var(--muted);font-size:10px}
-.chain[open]>summary::before{content:"▾"}
-.chain.settled{opacity:.75}
-.subj{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.note{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;margin-left:12px}
-.route{display:inline-flex;align-items:center;gap:3px;flex-shrink:0}
-.proj{font-size:10.5px;font-weight:600;border:1px solid var(--line);border-radius:3px;padding:0 4px;background:var(--idle-soft);color:var(--fg)}
-.arrow{color:var(--muted)}
-.route .meta{margin-left:3px}
-.note.unread .proj{border-color:var(--bad)} .note.unread .subj{color:var(--bad)}
-.btn.hot{border-color:var(--bad);color:var(--bad)}
+  --bg:#11171c; --panel:#192229; --fg:#e3e9ee; --muted:#8e9ba6; --line:#2b3740; --chip:#232e37;
+  --red:#e5533f; --red-fg:#fff; --red-soft:#3a1a15; --dot:#6aaaf0; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:12px/1.35 var(--f)}
+.wrap{max-width:1400px;margin:0 auto;padding-block:12px 20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:8px}
+header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0}
+.count{font-weight:600;color:var(--muted);background:var(--chip);border-radius:999px;padding:1px 8px} .count.hot{color:var(--red-fg);background:var(--red)}
+.sp{flex:1}
+.lb{font:inherit;background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer}
+.lb.hot{color:var(--red)} .lb:disabled{text-decoration:none;cursor:default}
+h2{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 0 0}
+h2::after{content:"";flex:1;border-top:1px solid var(--line)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:6px}
+.tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:6px;box-shadow:var(--shadow);padding:5px 7px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;transition:box-shadow .15s}
+.tile:hover{box-shadow:0 2px 8px rgba(23,33,42,.12)}
+.tile.hot{border-left-color:var(--red);background:var(--red-soft)}
+.name{font-weight:700;font-size:12.5px;color:var(--fg);text-decoration:none;margin-right:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+a.name:hover{text-decoration:underline}
+.t{font-size:11px;line-height:1.4;padding:0 8px;border-radius:999px;background:var(--chip);color:var(--fg);text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.t:hover{outline:1px solid var(--muted);outline-offset:-1px}
+.t:focus-visible,.name:focus-visible,.lb:focus-visible{outline:2px solid var(--dot);outline-offset:1px}
+.t.red{background:var(--red);color:var(--red-fg);font-weight:600}
+.t .d{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--dot);margin-right:3px;vertical-align:1px;animation:p 1.6s ease-in-out infinite}
+@keyframes p{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.t .d{animation:none}.tile{transition:none}}
+.none{color:var(--muted)}
+.bar{border:1px solid var(--red);color:var(--red);background:var(--red-soft);border-radius:6px;padding:4px 8px}
+.notes{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;max-height:40vh;overflow:auto}
+.notes div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.notes .un{color:var(--red)}
+.foot{color:var(--muted);font-size:11px;margin:6px 0 0;padding-top:8px;border-top:1px solid var(--line)}
+.foot code{font-size:11px}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;margin:0}
 [hidden]{display:none!important}
 </style>
 
 <div class="wrap">
-  <header>
-    <div class="ttl">
-      <h1>Status Board</h1>
-      <p class="sub" id="sub">Every project at a glance.</p>
-    </div>
-    <div class="legend" aria-label="Thread colors"><span class="s-thinking" title="Claude is on it"><span class="dot"></span>Thinking</span><span class="s-working" title="Background jobs are running"><span class="dot"></span>Working</span><span class="s-waiting"><span class="dot"></span>Waiting on you</span><span class="s-idle"><span class="dot"></span>Idle</span></div>
-    <div class="hbtns"><button class="btn" id="notesBtn" type="button" aria-expanded="false" title="Notes between projects">Notes</button><p class="howto"><b>Start each session</b> with <code>/board-status</code>: it puts the thread on its card and syncs the card's threads. <b>Notes</b>: ask Claude to "send a note to &lt;project&gt;" or "check mail". <b>New machine</b>: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="linkbtn" id="skillBtn" type="button" disabled title="Copy a prompt that sets up your board-skill skill with this board's link">copy the skill setup</button> and paste it into any Claude session.</p></div>
-  </header>
-
+  <header><h1>Status Board</h1><span class="count" id="count"></span><span class="sp"></span><button class="lb" id="notesBtn" type="button">Notes</button></header>
   <div id="notes" class="notes" hidden></div>
-  <div id="unmatched" class="unmatched" hidden></div>
-  <div id="board" aria-live="polite">
-    <div class="empty">Loading projects…</div>
-  </div>
-
-  <div id="skillBox" class="skillbox" hidden><p class="muted">Copying was blocked here. Select the text below and copy it, then paste it into any Claude session.</p><pre id="skillText"></pre></div>
-  <div id="tip" hidden role="tooltip"></div>
+  <div id="unmatched" class="bar" hidden></div>
+  <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
+  <p class="foot">Red = waits on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <div id="skillBox" hidden><p class="foot">Copying was blocked. Select and copy this:</p><pre id="skillText"></pre></div>
 </div>
 
 <script>
 (function(){
-  const STATUS = {
-    waiting:{label:"Waiting on you"}, thinking:{label:"Thinking"}, working:{label:"Working"}, idle:{label:"Idle"}
-  };
-  // Sections, in page order. A card's "category" picks its section; cards without one go to Analysis (key "paper").
-  // Grants, talks and personal work share one section, Misc.
+  const VERSION = "0.14.19";   // one version for board, mod and rules; bump all together
   const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
   const catKey = c => { const k = String(c || "").toLowerCase().trim(); const a = CAT_ALIAS[k] || k; return SECTIONS.some(s => s.key === a) ? a : "paper"; };
-  // Cards written before the switch to Claude Code's buckets keep rendering.
-  const LEGACY = {waiting_on_you:"waiting", blocked:"waiting", at_risk:"waiting", on_track:"working", paused:"idle", done:"idle"};
-  const stKey = s => STATUS[s] ? s : (LEGACY[s] || "idle");
-  const VERSION = "0.14.19";
-  let boardLink = "";
-  function skillPrompt(link){
-    return [
-      'Set up my personal skill "board-skill" so every session knows where my Status Board is. Save it with exactly the content below. If a skill with that name exists and cannot be updated in place, remove it and save this one as new. If you cannot save skills in this session, show me the content so I can add it under Customize, Skills.',
-      '',
-      '---',
-      'name: board-skill',
-      "description: Update this project's card on Wanding's Status Board, or find the board's address.",
-      '---',
-      '# Status Board',
-      'The Status Board is the artifact ' + link + '. Read and write it with the ArtifactData tool.',
-      'Its rules are the "rules" field of collection meta, doc_id instruction. Read them first and',
-      'follow them; they are the only description of the card format.',
-      "To update this project's card, follow those rules and write only this project's card.",
-      'If the board does not answer, tell the user in one line that the Status Board link in this',
-      'skill no longer works.'
-    ].join("\n");
-  }   // one version for board, mod and rules; bump all three together
-  let projects = [];
-  let messages = [];   // notes between projects (collection "messages")
-  let dbRef = null;
-  const unread = () => messages.filter(m => !m.read_at && !m.archived_at);
-  // The conversations a project is part of, newest first; cleared ones (archived_at) are left out.
-  function chainsFor(id){
-    const byId = {}; messages.forEach(m => byId[m.id] = m);
-    const rootOf = m => { const seen = new Set(); while (m.re && byId[m.re] && !seen.has(m.re)){ seen.add(m.re); m = byId[m.re]; } return m.id; };
-    const groups = {};
-    messages.forEach(m => { const r = rootOf(m); (groups[r] = groups[r] || []).push(m); });
-    return Object.values(groups)
-      .filter(ns => (!id || ns.some(m => m.to === id || m.from === id)) && !ns.every(m => m.archived_at))
-      .map(ns => { ns.sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")));
-        return { notes: ns, settled: ns.every(m => m.read_at), last: ns[ns.length - 1].at }; })
-      .sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")));
-  }
-  // All notes between projects in one place: each conversation once, open ones first.
-  let notesOpen = false;
-  const folds = {};   // which conversations the viewer folded or unfolded, by first note id
-  try { notesOpen = localStorage.getItem("sb-notes") === "1"; } catch(e){}
-  function renderNotes(){
-    const n = unread().length, btn = $("notesBtn");
-    btn.textContent = n ? "Notes · " + n + " unread" : "Notes";
-    btn.classList.toggle("hot", n > 0);
-    btn.setAttribute("aria-expanded", String(notesOpen));
-    const box = $("notes"); box.hidden = !notesOpen; box.replaceChildren();
-    if (!notesOpen) return;
-    const chains = chainsFor(null), open = chains.filter(c => !c.settled), done = chains.filter(c => c.settled);
-    if (!chains.length){ box.append(el("p",{class:"muted",text:"No notes between projects."})); return; }
-    const pname = id => { const q = projects.find(x => x.id === id); return q ? (q.name || q.id) : id; };
-    const route = (m, extra) => el("span",{class:"route"}, el("span",{class:"proj",text:pname(m.from)}), el("span",{class:"arrow",text:"→"}), el("span",{class:"proj",text:pname(m.to)}), el("span",{class:"meta",text:extra}));
-    // Each conversation is a foldable block: the summary line names who wrote to whom, how many notes,
-    // when the last came and the first subject. Every conversation starts folded.
-    [...open, ...done].forEach(c => { const m = c.notes[0], k = c.notes.length, key = m.id, waiting = c.notes.filter(x => !x.read_at).length;
-      const d = el("details",{class:"chain" + (c.settled ? " settled" : "")});
-      d.open = !!folds[key];   // folded until the viewer opens it
-      d.addEventListener("toggle", () => { folds[key] = d.open; });
-      // The route is the first note's; the unread count names who has yet to read, since replies go the other way.
-      const readers = [...new Set(c.notes.filter(x => !x.read_at).map(x => pname(x.to)))].join(", ");
-      const sum = el("summary",null, route(m, k + " note" + (k === 1 ? "" : "s") + " · " + ago(c.last) + (waiting ? " · " + waiting + " unread by " + readers : " · settled")), el("span",{class:"subj",text:m.subject || ""}));
-      if (waiting){ const rd = el("button",{class:"linkbtn",type:"button",title:"Mark this conversation's notes as read (you have read them here)",text:"mark read"});
-        rd.addEventListener("click", ev => { ev.preventDefault(); markRead(c); }); sum.append(" ", rd); }
-      if (c.settled){ const clear = el("button",{class:"linkbtn",type:"button",title:"Hide this conversation from the board (the notes stay in the data)",text:"clear"});
-        clear.addEventListener("click", ev => { ev.preventDefault(); clearChain(c); }); sum.append(" ", clear); }
-      d.append(sum);
-      c.notes.forEach((x, i) => { const fresh = !x.read_at;
-        d.append(el("div",{class:"note" + (i ? " reply" : "") + (fresh ? " unread" : "")}, route(x, ago(x.at) + (fresh ? " · unread by " + pname(x.to) : "")), el("span",{class:"subj",text:x.subject || ""}))); });
-      box.append(d); });
-  }
-  async function markRead(c){
-    if (!dbRef) return;
-    const at = new Date().toISOString();
-    for (const m of c.notes.filter(x => !x.read_at)) { try { await dbRef.doc("messages/" + m.id).update({read_at: at}); } catch(e){} }
-  }
-  async function clearChain(c){
-    if (!dbRef) return;
-    const at = new Date().toISOString();
-    for (const m of c.notes) { try { await dbRef.doc("messages/" + m.id).update({archived_at: at}); } catch(e){} }
-  }
-  // Threads the mod could not place on any card (collection "unmatched"), shown so nothing is guessed.
-  function renderUnmatched(rows){
-    const box = $("unmatched"), recent = rows.filter(r => r.at && Date.now() - Date.parse(r.at) < 24*3600000);
-    box.hidden = !recent.length; box.replaceChildren();
-    if (!recent.length) return;
-    box.append(el("b",{text:recent.length + " thread" + (recent.length === 1 ? "" : "s") + " not on any card"}));
-    // Named by its thread title and its project's other threads when the listing gave them.
-    recent.forEach(r => { const peers = arr(r.threads).filter(Boolean);
-      box.append(el("span",{text:(r.title ? "\u201c" + r.title + "\u201d in " : "") + (r.folder || "unknown folder") + " (" + (r.session || r.id) + ", " + ago(r.at) + "): " + (r.why || "") + (peers.length ? "; its project's threads: " + peers.join(", ") : "")})); });
-  }
   const $ = id => document.getElementById(id);
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
     if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
     for (const k of kids) if (k != null) n.append(k); return n; };
   const arr = v => Array.isArray(v) ? v.filter(x => x != null && x !== "") : (v ? [v] : []);
   const safe = u => typeof u === "string" && /^https:\/\//.test(u);
-  const first = v => Array.isArray(v) ? arr(v)[0] : (typeof v === "string" ? v : "");
+  let projects = [], messages = [], dbRef = null, boardLink = "";
 
-  function ago(iso){
-    if (!iso) return "never";
-    const t = Date.parse(iso); if (isNaN(t)) return "";
-    const d = (Date.now() - t) / 86400000;
-    if (d < 1/24) return "just now";
-    if (d < 1) return Math.round(d*24) + "h ago";
-    if (d < 14) return Math.round(d) + "d ago";
-    return new Date(t).toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"});
-  }
+  // A thread is red when it waits on you: its status says so, or it still lists open items.
+  // It is active (a small dot) while Claude is on a turn or background jobs run.
+  const openAsks = t => arr(t.asks).filter(a => a && a.text && !a.done_at);
+  const ended = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
+  const isRed = t => /^(waiting|waiting_on_you|blocked|at_risk)$/.test(String(t.status || "")) || openAsks(t).length > 0;
+  const isActive = t => !ended(t) && (t.status === "thinking" || arr(t.jobs).length > 0);
+  const waitText = t => { const a = openAsks(t).map(x => String(x.text).replace(/^#\d+\s*/, "")); return a.length ? a.join("\n") : (typeof t.waiting === "string" ? t.waiting : ""); };
 
-  // A thread's background jobs: "jobs" (the mod lists what still runs at the end of each turn), or the
-  // older single "job" line.
-  const jobsOf = t => { const js = arr(t.jobs).map(j => typeof j === "string" ? j : (j && j.text) || "").map(x => String(x).trim()).filter(Boolean);
-    return js.length || Array.isArray(t.jobs) ? js : ((typeof t.job === "string" && t.job.trim()) ? [t.job.trim()] : []); };
-  // What a thread waits on you for ("asks": [{id, text, at}]), kept by the thread from its "Waiting on you"
-  // line; the thread takes an item off once it is addressed.
-  // Waiting lines read lean: a "Wanding:" or "waiting on you" lead-in says nothing on a W line.
-  const LEAD = /^\s*(?:waiting on (?:you|wanding|the user)\s*(?:for|to|:|,|-)?\s*|(?:wanding|the user|user|you)\s*(?:needs? to|should|must|to|:|,|-)\s*)/i;
-  const lean = x => { let t = String(x || "").trim(); for (let i = 0; i < 2 && LEAD.test(t); i++) t = t.replace(LEAD, ""); if (/^(in|on|at)\b/i.test(t)) t = "Reply " + t; return t ? t[0].toUpperCase() + t.slice(1) : t; };
-  const openAsks = t => arr(t && t.asks).filter(a => a && a.id && a.text && !a.done_at);
-  // An item the thread is working on: the user started a turn and the thread is still on it.
-  const inWork = (t, a) => !!(a && a.work) && (threadState(t) || {}).key === "thinking";
-  const workMark = () => el("span",{class:"wk",title:"Being worked on",text:"\u27f3"});
-  // A thread's state. "status" is the chat itself: thinking (Claude is on a turn), waiting on you, or idle.
-  // Background jobs are a separate light on the thread's button; an idle chat with jobs counts as working.
-  // Thinking beats working, since a thinking thread can take something else only once it is done.
-  function threadState(t){
-    const raw = t.status ? stKey(t.status) : "";
-    const jobs = jobsOf(t);
-    let S = raw ? {key:raw} : (jobs.length ? {key:"idle"} : null);
-    if (S && S.key === "thinking" && endedAfterAt(t)) S = {key:"idle"};   // the session ended mid-turn
-    if (S && S.key === "idle" && openAsks(t).length) S = {key:"waiting"};   // still lists what it waits on
-    if (S && S.key === "idle" && jobs.length) S = {key:"working"};
-    return S;
+  function chip(t){
+    const red = isRed(t), label = t.label || "Thread";
+    const title = red ? "Waits on you" + (waitText(t) ? ":\n" + waitText(t) : "") : (isActive(t) ? "Claude is on it" : "Nothing needed");
+    const kids = [isActive(t) && !red ? el("span",{class:"d"}) : null, label];
+    return safe(t.url) ? el("a",{class:"t" + (red ? " red" : ""),href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
+                       : el("span",{class:"t" + (red ? " red" : ""),title:title + " (no link yet)"}, ...kids);
   }
-  const endedAfterAt = t => t.ended && (!t.at || Date.parse(t.ended) >= Date.parse(t.at) - 1000);
-  const ORDER = ["waiting","thinking","working","idle"];
-  function cardKey(p){
-    const ks = arr(p.threads).filter(Boolean).map(threadState).filter(Boolean).map(s => s.key);
-    for (const k of ORDER) if (ks.includes(k)) return k;
-    return stKey(p.status);
-  }
-  // Which sections are folded is remembered per browser.
-  let folded = new Set();
-  try { folded = new Set(JSON.parse(localStorage.getItem("sb-folded") || "[]")); } catch(e){}
-  function saveFolded(){ try { localStorage.setItem("sb-folded", JSON.stringify([...folded])); } catch(e){} }
+  // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
+  const projectUrl = p => { const m = arr(p.threads).map(t => /^(https:\/\/claude\.ai\/code\/project\/[A-Za-z0-9_-]+)\?thread=/.exec(String(t && t.url || ""))).find(Boolean); return m ? m[1] : (safe(p.url) ? p.url : ""); };
 
-  function card(p){
-    const c = el("article",{class:"card k-" + cardKey(p),"data-id":p.id});
-    const top = el("div",{class:"top"}, el("h3",{text:p.name||p.id}), el("span",{class:"meta",text:ago(p.updated)}));
-    if (safe(p.url)) top.append(el("a",{class:"btn go",href:p.url,target:"_blank",rel:"noopener",title:"Open this project in Claude",text:"Open ↗"}));
-    c.append(top);
-    // Body: summary / next / blockers, then every thread's button along the bottom.
-    const body = el("div",{class:"body"}); c.append(body);
-    const all = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
-    const r = el("div",{class:"threads"});
-    const pl = projectLink(p); if (pl) r.append(pl);
-    all.forEach(t => r.append(threadButton(t)));
-    if (!all.length) r.append(el("span",{class:"line muted",text:"No threads"}));
-    const txt = el("div",{class:"text"}); body.append(txt);
-    // What waits on you comes first, since it matters most: the open items the threads keep (up to
-    // three lines, then a count), else the threads' waiting lines, else the card's blocker.
-    const items = waitingItems(p).map(x => ({text: lean(x.a.text), work: inWork(x.t, x.a)}));
-    const waits = items.length ? items.filter(x => x.text) : asks(p).concat(arr(p.blocker), arr(p.blockers)).map(lean).filter(Boolean).map(text => ({text}));
-    waits.slice(0, 3).forEach((x, k) => txt.append(el("p",{class:"line bad" + (x.work ? " inwork" : "")}, el("b",{text:k ? "·" : "W",title:"Waiting on you"}), x.work ? workMark() : null, x.text)));
-    if (waits.length > 3) txt.append(el("p",{class:"line bad more"},"+ " + (waits.length - 3) + " more waiting on you"));
-    // Then the summary (one line) and the next step, which always shows, None when there is none.
-    if (p.summary) txt.append(el("p",{class:"line",text:p.summary}));
-    const nx = first(p.next); txt.append(el("p",{class:"line next"}, el("b",{text:"N",title:"Next"}), nx || "None"));
-    body.append(r);
-    hookTip(c, p);
+  function tile(p){
+    const ths = arr(p.threads).filter(t => t && (safe(t.url) || t.label)), hot = ths.some(isRed);
+    const u = projectUrl(p), nm = p.name || p.id;
+    const c = el("div",{class:"tile" + (hot ? " hot" : "")}, u ? el("a",{class:"name",href:u,target:"_blank",rel:"noopener",title:"Open this project",text:nm}) : el("span",{class:"name",text:nm}));
+    ths.forEach(t => c.append(chip(t)));
+    if (!ths.length) c.append(el("span",{class:"none",text:"no threads"}));
     return c;
   }
 
-  // ---- Hover card with the full text ----
-  let tipTimer = null, tipFor = null;
-  // What the chats waiting on you ask for, as "Label: request" (the plugin writes it with the status).
-  // Every open item a card's threads wait on you for, newest first, as {t, a}.
-  // Threads with the newest item come first; each thread's items keep the order of its list (#1, #2, ...).
-  function waitingItems(p){
-    const newest = t => openAsks(t).map(a => String(a.at || "")).sort().pop() || "";
-    return arr(p.threads).filter(Boolean).filter(t => openAsks(t).length)
-      .sort((x, y) => newest(y).localeCompare(newest(x)))
-      .flatMap(t => openAsks(t).map(a => ({t, a})));
-  }
-  function asks(p){
-    // Every thread waiting on you is named, with its line or, from an older plugin without one, a pointer to the thread.
-    return arr(p.threads).filter(t => t && (threadState(t) || {}).key === "waiting")
-      .sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")))
-      .map(t => (t.label || "Thread") + ": " + (typeof t.waiting === "string" && t.waiting.trim() ? t.waiting.trim() : "waiting on you; see the thread"));
-  }
-  function fillTip(p){
-    const t = $("tip"); t.replaceChildren(el("h4",{text:p.name||p.id}));
-    // Waiting on you: each thread's open items, then (from threads that keep no list) waiting lines and the blocker.
-    // When threads keep their own lists, those are the whole story (the card face shows them alone too);
-    // the card's hand-written blocker shows only on cards whose threads keep none.
-    const items = waitingItems(p), bl = items.length ? [] : asks(p).concat(arr(p.blocker), arr(p.blockers));
-    if (items.length || bl.length){ const w = el("div",{class:"bad"}, el("b",{text:"Waiting on you"}));
-      // Grouped by thread: the thread's name as a link, then its items as bullets.
-      const groups = new Map(); items.forEach(({t: th, a}) => { if (!groups.has(th)) groups.set(th, []); groups.get(th).push(a); });
-      groups.forEach((as, th) => {
-        const name = th.label || "Thread";
-        w.append(el("p",{class:"askhead"}, safe(th.url) ? el("a",{href:th.url,target:"_blank",rel:"noopener",text:name}) : name, ":"));
-        const ul = el("ul",{class:"asklist"}); as.forEach(a => ul.append(inWork(th, a) ? el("li",{class:"inwork"}, workMark(), lean(a.text)) : el("li",{text:lean(a.text)}))); w.append(ul); });
-      bl.map(lean).filter(Boolean).forEach(x => w.append(el("p",{text:x}))); t.append(w); }
-    if (p.summary) t.append(el("p",{text:p.summary}));
-    const nx = arr(p.next); t.append(el("p",{class:"next"}, el("b",{text:"Next"}), nx.length ? nx.join(" · ") : "None"));
-    if (!p.summary && !nx.length && !bl.length && !items.length) t.append(el("p",{class:"muted",text:"No update yet."}));
-    const all = arr(p.threads).filter(x => x && (safe(x.url) || x.label));
-    if (all.length){ const r = el("div",{class:"threads"}); const pl = projectLink(p); if (pl) r.append(pl); all.forEach(x => r.append(threadButton(x))); t.append(el("p",null, el("b",{text:"Threads (" + all.length + ")"})), r); }
-    // Every running background job, by thread.
-    const running = all.flatMap(x => jobsOf(x).map(j => (x.label || "Thread") + ": " + j));
-    if (running.length){ const w = el("div",{class:"next"}, el("b",{text:"Running jobs (" + running.length + ")"})); running.forEach(x => w.append(el("p",{text:x}))); t.append(w); }
-    t.append(el("p",{class:"meta",text:"Updated " + ago(p.updated) + (p.updatedBy ? " · " + p.updatedBy : "")}));
-  }
-  function placeTip(card){
-    const t = $("tip"), r = card.getBoundingClientRect(), W = innerWidth, H = innerHeight, g = 8;
-    t.hidden = false; const tw = t.offsetWidth, th = t.offsetHeight;
-    let x = r.right + g, y = r.top;
-    if (x + tw > W - g) x = r.left - g - tw;            // no room on the right: go left
-    if (x < g){ x = Math.min(Math.max(g, r.left), W - tw - g); y = r.bottom + g;   // no room either side: go below
-      if (y + th > H - g) y = r.top - g - th; }       // or above
-    y = Math.min(Math.max(g, y), Math.max(g, H - th - g));
-    t.style.left = x + "px"; t.style.top = y + "px";
-  }
-  let openId = null;   // which project's panel is open; survives re-renders from card updates
-  function showTip(card, p){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = card; openId = p.id; card.classList.add("open"); fillTip(p); placeTip(card); }
-  function hideTip(){ clearTimeout(tipTimer); if (tipFor) tipFor.classList.remove("open"); tipFor = null; openId = null; $("tip").hidden = true; }
-  // Click a card (not a button) to open its full text; click it again, click elsewhere, or press Esc to close.
-  function hookTip(c, p){
-    c.addEventListener("click", e => { if (e.target.closest("a,button")) return; if (tipFor === c && !$("tip").hidden) hideTip(); else showTip(c, p); });
-  }
-  document.addEventListener("keydown", e => { if (e.key === "Escape") hideTip(); });
-  document.addEventListener("click", e => { if (!e.target.closest(".card, #tip")) hideTip(); });
-  addEventListener("resize", hideTip);
-
-  // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
-  function projectLink(p){
-    const u = arr(p.threads).map(t => t && String(t.url || "")).map(x => /^(https:\/\/claude\.ai\/code\/project\/[A-Za-z0-9_-]+)\?thread=/.exec(x)).find(Boolean);
-    return u ? el("a",{class:"tbtn proj-link",href:u[1],target:"_blank",rel:"noopener",title:"Open this project's threads view",text:"Threads"}) : null;
-  }
-  function threadButton(t){
-    const s = threadState(t), tk = s ? s.key : "", jobs = jobsOf(t);
-    const light = jobs.length ? el("span",{class:"jobs",text:String(jobs.length)}) : null;
-    const waitingN = openAsks(t).length;
-    const prog = waitingN ? el("span",{class:"asksn",text:String(waitingN)}) : null;
-    // The connection /board-status last saw. A thread that has reported since then was connected to do so, so it is not dimmed.
-    const c = t.conn && typeof t.conn === "object" ? t.conn : null;
-    const since = c && t.at && c.checked && Date.parse(t.at) > Date.parse(c.checked);
-    const off = !!c && !since && (c.state === "offline" || c.state === "stopped");
-    const connLine = c && c.state ? "\nConnection: " + c.state + (c.where ? ", " + c.where : "") + (c.since ? ", since " + ago(c.since) : "") + (c.checked ? " (checked " + ago(c.checked) + ")" : "") + (since && c.state !== "online" ? "; active since, so connected" : "") : "";
-    const when = t.ended && endedAfterAt(t) ? "session ended " + ago(t.ended) : (t.at ? "last activity " + ago(t.at) : "no activity recorded");
-    if (!safe(t.url)) return el("span",{class:"tbtn" + (tk ? " t-" + tk : "") + (off ? " off" : ""),title:"Link not set yet. " + when + connLine,text:(t.label||"Thread")});
-    const state = tk ? STATUS[tk].label.toLowerCase() + (t.at ? ", reported " + ago(t.at) : ", as of the last card update") : "";
-    const tip = "Open this thread in Claude" + (state ? " (" + state + ")" : "") + (tk === "waiting" && typeof t.waiting === "string" && t.waiting ? "\nWaiting on you: " + t.waiting : "") + connLine;
-    return el("a",{class:"tbtn" + (tk ? " t-" + tk : "") + (off ? " off" : ""),href:t.url,target:"_blank",rel:"noopener",title:tip,"aria-label":(t.label||"Thread") + (state ? ", " + state : "") + (off ? ", " + c.state : "")}, tk ? el("span",{class:"tdot"}) : null, (t.label||"Thread"), prog, light);
-  }
-
   function render(){
-    const keep = openId; tipFor = null; $("tip").hidden = true;
     const b = $("board"); b.replaceChildren();
     const pr = {high:0, medium:1, low:2};
-    if (!projects.length){ b.append(el("div",{class:"empty",text:"No projects yet. Say “update the board” inside any Claude project."})); }
-    else SECTIONS.forEach(sec => {
+    if (!projects.length) b.append(el("p",{class:"none",text:"No projects yet."}));
+    SECTIONS.forEach(sec => {
       const rows = projects.filter(p => catKey(p.category) === sec.key)
         .sort((a,b) => (pr[a.priority] ?? 1) - (pr[b.priority] ?? 1) || String(a.name||a.id).localeCompare(String(b.name||b.id), undefined, {sensitivity:"base"}));
-      const id = "sec-" + sec.key;
-      // Folded sections show a status tally in their header so nothing urgent hides.
-      const tally = {}; rows.forEach(p => { const k = cardKey(p); tally[k] = (tally[k]||0) + 1; });
-      const dots = el("span",{class:"sum-dots"});
-      ["waiting","working"].forEach(k => { if (tally[k]) dots.append(el("span",{class:"s-"+k}, el("span",{class:"dot"}), tally[k] + " " + STATUS[k].label.toLowerCase())); });
-      const s = el("details",{class:"section",id:id},
-        el("summary",{class:"sec-head"}, el("h2",{text:sec.label}), el("span",{class:"n",text:String(rows.length)}), dots));
-      s.open = !folded.has(sec.key);
-      s.addEventListener("toggle", () => { if (s.open) folded.delete(sec.key); else folded.add(sec.key); saveFolded(); });
-      if (rows.length){ const g = el("div",{class:"grid"}); rows.forEach(p => g.append(card(p))); s.append(g); }
-      else s.append(el("p",{class:"sec-empty",text:"Nothing here yet."}));
-      b.append(s);
+      if (!rows.length) return;
+      const g = el("div",{class:"grid"}); rows.forEach(p => g.append(tile(p)));
+      b.append(el("h2",{text:sec.label}), g);
     });
-    const stale = projects.filter(p => !p.updated || (Date.now()-Date.parse(p.updated))/86400000 > 14).length;
-    if (keep){ const p = projects.find(x => x.id === keep); const c = p && document.querySelector('#board .card[data-id="' + CSS.escape(keep) + '"]'); if (p && c) showTip(c, p); else openId = null; }
-    renderNotes();
-    $("sub").textContent = projects.length ? projects.length + " project" + (projects.length===1?"":"s") + (stale ? " · " + stale + " not updated in 2+ weeks" : "") + " · v" + VERSION : "Every project at a glance. v" + VERSION;
+    const n = projects.flatMap(p => arr(p.threads)).filter(t => t && isRed(t)).length;
+    $("count").textContent = n ? n + " need" + (n === 1 ? "s" : "") + " you" : "nothing needs you";
+    $("count").classList.toggle("hot", n > 0);
+    $("ver").textContent = "v" + VERSION;
   }
 
+  // Notes between projects: unread count on the button; the list opens on click.
+  let notesOpen = false;
+  try { notesOpen = localStorage.getItem("sb-notes") === "1"; } catch(e){}
+  function renderNotes(){
+    const live = messages.filter(m => !m.archived_at).sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+    const un = live.filter(m => !m.read_at), btn = $("notesBtn");
+    btn.textContent = un.length ? "Notes · " + un.length + " unread" : "Notes";
+    btn.classList.toggle("hot", un.length > 0);
+    const box = $("notes"); box.hidden = !notesOpen; box.replaceChildren();
+    if (!notesOpen) return;
+    const pname = id => { const q = projects.find(x => x.id === id); return q ? (q.name || q.id) : id; };
+    if (!live.length) box.append(el("div",{class:"none",text:"No notes."}));
+    live.slice(0, 30).forEach(m => box.append(el("div",{class:m.read_at ? "" : "un",title:m.body || ""}, pname(m.from) + " → " + pname(m.to) + ": " + (m.subject || ""))));
+    if (un.length){ const rd = el("button",{class:"lb",type:"button",text:"mark all read"});
+      rd.onclick = async () => { const at = new Date().toISOString(); for (const m of un){ try { await dbRef.doc("messages/" + m.id).update({read_at: at}); } catch(e){} } };
+      box.append(rd); }
+  }
+  function renderUnmatched(rows){
+    const recent = rows.filter(r => r.at && Date.now() - Date.parse(r.at) < 24*3600000), box = $("unmatched");
+    box.hidden = !recent.length;
+    box.textContent = recent.length ? "Not on any card: " + recent.map(r => r.title || r.session || r.id).join(", ") : "";
+  }
+  function skillPrompt(link){
+    return ['Set up my personal skill "board-skill" so every session knows where my Status Board is. Save it with exactly the content below. If a skill with that name exists and cannot be updated in place, remove it and save this one as new. If you cannot save skills in this session, show me the content so I can add it under Customize, Skills.',
+      '', '---', 'name: board-skill', "description: Update this project's card on Wanding's Status Board, or find the board's address.", '---',
+      '# Status Board', 'The Status Board is the artifact ' + link + '. Read and write it with the ArtifactData tool.',
+      'Its rules are the "rules" field of collection meta, doc_id instruction. Read them first and',
+      'follow them; they are the only description of the card format.',
+      "To update this project's card, follow those rules and write only this project's card.",
+      'If the board does not answer, tell the user in one line that the Status Board link in this', 'skill no longer works.'].join("\n");
+  }
   $("skillBtn").onclick = async () => {
     if (!boardLink) return;
-    const text = skillPrompt(boardLink), btn = $("skillBtn");
-    try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; setTimeout(() => btn.textContent = "copy the skill setup", 1600); $("skillBox").hidden = true; }
+    const text = skillPrompt(boardLink);
+    try { await navigator.clipboard.writeText(text); $("skillBtn").textContent = "copied"; setTimeout(() => $("skillBtn").textContent = "copy the skill setup", 1600); }
     catch (e) { $("skillText").textContent = text; $("skillBox").hidden = false; }
   };
 
   (async function start(){
     const db = await claude.use("db"); dbRef = db;
-    if (!db){ $("board").replaceChildren(el("div",{class:"empty",text:"Sign in to claude.ai to see your status board."})); return; }
+    if (!db){ $("board").replaceChildren(el("p",{class:"none",text:"Sign in to claude.ai to see your status board."})); return; }
     $("notesBtn").onclick = () => { notesOpen = !notesOpen; try { localStorage.setItem("sb-notes", notesOpen ? "1" : "0"); } catch(e){} renderNotes(); };
-    db.collection("messages").onSnapshot(snap => { messages = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); renderNotes(); }, () => {});
-    db.collection("unmatched").onSnapshot(snap => renderUnmatched(snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
-    db.collection("projects").onSnapshot(snap => {
-      projects = snap.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()));
-      // Threads still on the old rule write only the card's status; color those threads from it.
-      projects.forEach(p => { if (p.status) p.threads = arr(p.threads).map(t => t && !t.status ? Object.assign({}, t, {status:p.status, at:t.at || p.updated}) : t); });
-      render();
-    }, err => { $("board").replaceChildren(el("div",{class:"empty",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload the page to try again."})); });
-    // The board's own link is kept in its data (meta/instruction.board): a page cannot read its own
-    // address. "Copy skill setup" builds the prompt from it, so a rebuilt board hands out its new link.
-    db.doc("meta/instruction").onSnapshot(s => {
-      const d = s.exists ? s.data() : null;
+    db.collection("messages").onSnapshot(s => { messages = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); renderNotes(); }, () => {});
+    db.collection("unmatched").onSnapshot(s => renderUnmatched(s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
+    db.collection("projects").onSnapshot(s => { projects = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); render(); renderNotes(); },
+      err => { $("board").replaceChildren(el("p",{class:"none",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload to try again."})); });
+    // The board's own link is kept in its data (meta/instruction.board): a page cannot read its own address.
+    db.doc("meta/instruction").onSnapshot(s => { const d = s.exists ? s.data() : null;
       boardLink = d && typeof d.board === "string" && /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+$/.test(d.board) ? d.board : "";
-      $("skillBtn").disabled = !boardLink;
-      $("skillBtn").title = boardLink ? "Copy a prompt that sets up your board-skill skill with this board's link" : "This board's link is not recorded yet (meta/instruction.board)";
-    }, () => {});
-    setInterval(() => { if (projects.length) render(); }, 60000);
+      $("skillBtn").disabled = !boardLink; }, () => {});
   })();
 })();
 </script>
