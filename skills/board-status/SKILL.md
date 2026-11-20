@@ -12,8 +12,9 @@ board-skill skill (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T if no such 
 Read and write it with the ArtifactData tool; load it with ToolSearch ("select:ArtifactData") if it
 is deferred. Its rules are the "rules" field of collection meta, doc_id instruction.
 
-1. **List the project's threads.** Call the project's thread-listing tool (list_thread_sessions, or
-   list_threads) once, with no arguments. The row whose session id is this session's names this
+1. **List the project's threads, every time.** Call the project's thread-listing tool (list_thread_sessions,
+   or list_threads) once, with no arguments, even when you already know this thread's id: the mod
+   syncs the card's thread list only from this call's result, so skipping it leaves new threads off. The row whose session id is this session's names this
    thread (its thread_id, a cmsg_… id). The mod places this thread on its project's card if it is
    not there yet, and, with its next status write (at the end of this turn), makes the card's thread
    list match the project's open threads and names this thread's entry. Do not edit the thread list
