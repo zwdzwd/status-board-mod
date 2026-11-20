@@ -1,50 +1,60 @@
 <title>Status Board</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
 <style>
-/* Compact board: one small tile per project in a stable spot (section, priority, name), each tile a row of
-   thread links. Red means the thread waits on you; every other thread is neutral, with a small pulsing dot
-   while Claude is on it. Hover a red link to see what it waits on. */
+/* Layout: a quiet ledger. Sections stack; inside each, project panels flow in newspaper columns in a stable
+   order (priority, name). Each panel lists its threads one per line behind a square marker: solid red
+   when the thread waits on you, a faint ring otherwise. Red is the only loud colour on the page. Hover a red line to see what it waits on. */
 :root{
-  --bg:#f4f5f6; --panel:#fff; --fg:#17212a; --muted:#6b7884; --line:#dde2e6; --chip:#eceff2;
-  --red:#c42b1c; --red-fg:#fff; --red-soft:#fde7e4; --dot:#2f7fd0;
-  --f:system-ui,-apple-system,"Segoe UI",sans-serif; --shadow:0 1px 2px rgba(23,33,42,.06);
+  --bg:#f2f3f6; --panel:#fff; --fg:#1a1e29; --fg2:#4a5163; --muted:#737a8c; --line:#e2e5ec; --hover:#eef0f5;
+  --red:#cf2f27; --red-fg:#fff; --red-soft:#fdecea; --dot:#2b6fd6;
+  --f:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#11171c; --panel:#192229; --fg:#e3e9ee; --muted:#8e9ba6; --line:#2b3740; --chip:#232e37;
-  --red:#e5533f; --red-fg:#fff; --red-soft:#3a1a15; --dot:#6aaaf0; color-scheme:dark}}
+  --bg:#0f1116; --panel:#171a22; --fg:#e7e9ef; --fg2:#b3b9c7; --muted:#858c9d; --line:#272b37; --hover:#1f232e;
+  --red:#f05a4c; --red-fg:#fff; --red-soft:#3a1916; --dot:#6ea3ff; color-scheme:dark}}
 :root[data-theme="dark"]{
-  --bg:#11171c; --panel:#192229; --fg:#e3e9ee; --muted:#8e9ba6; --line:#2b3740; --chip:#232e37;
-  --red:#e5533f; --red-fg:#fff; --red-soft:#3a1a15; --dot:#6aaaf0; color-scheme:dark}
-body{background:var(--bg);color:var(--fg);font:12px/1.35 var(--f)}
-.wrap{max-width:1400px;margin:0 auto;padding-block:12px 20px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:8px}
-header{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px solid var(--line)}
-h1{font-size:17px;font-weight:700;letter-spacing:-.01em;margin:0}
-.count{font-weight:600;color:var(--muted);background:var(--chip);border-radius:999px;padding:1px 8px} .count.hot{color:var(--red-fg);background:var(--red)}
+  --bg:#0f1116; --panel:#171a22; --fg:#e7e9ef; --fg2:#b3b9c7; --muted:#858c9d; --line:#272b37; --hover:#1f232e;
+  --red:#f05a4c; --red-fg:#fff; --red-soft:#3a1916; --dot:#6ea3ff; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font:13px/1.35 var(--f);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1320px;margin:0 auto;padding-block:18px 24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:12px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0}
+.count{font-size:12.5px;font-weight:500;color:var(--muted)}
+.count.hot{color:var(--red-fg);background:var(--red);font-weight:600;border-radius:6px;padding:2px 9px}
 .sp{flex:1}
-.lb{font:inherit;background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer}
-.lb.hot{color:var(--red)} .lb:disabled{text-decoration:none;cursor:default}
-h2{display:flex;align-items:center;gap:8px;font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:8px 0 0}
+.lb{font:inherit;background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.lb:hover{color:var(--fg)}
+.lb.hot{color:var(--red);font-weight:600} .lb:disabled{text-decoration:none;cursor:default}
+#board{display:flex;flex-direction:column;gap:10px}
+h2{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:6px 0 0}
 h2::after{content:"";flex:1;border-top:1px solid var(--line)}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,190px),1fr));gap:6px}
-.tile{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:6px;box-shadow:var(--shadow);padding:5px 7px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-width:0;transition:box-shadow .15s}
-.tile:hover{box-shadow:0 2px 8px rgba(23,33,42,.12)}
-.tile.hot{border-left-color:var(--red);background:var(--red-soft)}
-.name{flex-basis:100%;font-weight:700;font-size:12.5px;color:var(--fg);text-decoration:none;margin:0 0 1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-a.name:hover{text-decoration:underline}
-.t{font-size:11px;line-height:1.4;padding:0 8px;border-radius:999px;background:var(--chip);color:var(--fg);text-decoration:none;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
-.t:hover{outline:1px solid var(--muted);outline-offset:-1px}
+.grid{columns:13.5rem;column-gap:10px}
+.tile{break-inside:avoid;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 6px 6px;margin:0 0 10px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.name{font-weight:700;font-size:14px;letter-spacing:-.01em;color:var(--fg);text-decoration:none;padding:0 6px 4px;overflow-wrap:anywhere}
+a.name:hover{text-decoration:underline;text-underline-offset:2px}
+.t{display:flex;align-items:flex-start;gap:8px;padding:3px 6px;border-radius:6px;color:var(--fg2);text-decoration:none;min-width:0}
+a.t:hover{background:var(--hover);color:var(--fg)}
+.t .l{min-width:0;overflow-wrap:anywhere}
+.t .m{flex:none;width:17px;height:17px;border-radius:5px;display:grid;place-items:center;font-size:11px;font-weight:700;line-height:1}
+.t .m::before{content:"";width:6px;height:6px;border-radius:50%;border:1.5px solid var(--muted);opacity:.45;box-sizing:border-box}
+.t.red{color:var(--fg);font-weight:600}
+.t.red .m{background:var(--red);color:var(--red-fg)}
+.t.red .m::before{content:none}
+a.t.red:hover{background:var(--red-soft)}
+span.t{opacity:.7}
 .t:focus-visible,.name:focus-visible,.lb:focus-visible{outline:2px solid var(--dot);outline-offset:1px}
-.t.red{background:var(--red);color:var(--red-fg);font-weight:600}
-.t .d{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--dot);margin-right:3px;vertical-align:1px;animation:p 1.6s ease-in-out infinite}
-@keyframes p{50%{opacity:.25}}
-@media (prefers-reduced-motion: reduce){.t .d{animation:none}.tile{transition:none}}
-.none{color:var(--muted)}
-.bar{border:1px solid var(--red);color:var(--red);background:var(--red-soft);border-radius:6px;padding:4px 8px}
-.notes{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;max-height:40vh;overflow:auto}
-.notes div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.notes .un{color:var(--red)}
-.foot{color:var(--muted);font-size:11px;margin:6px 0 0;padding-top:8px;border-top:1px solid var(--line)}
-.foot code{font-size:11px}
+.none{color:var(--muted);padding:0 6px}
+.bar{color:var(--fg);background:var(--red-soft);border-radius:8px;padding:6px 10px}
+.notes{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;max-height:40vh;overflow:auto;display:flex;flex-direction:column;gap:3px}
+.notes div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg2)}
+.notes .un{color:var(--fg);font-weight:600}
+.notes .none{padding:0}
+.foot{color:var(--muted);font-size:12px;line-height:1.5;margin:0}
+.foot a{color:inherit;text-underline-offset:2px}
+.foot code{font-size:11.5px}
+.key{display:inline-block;width:11px;height:11px;border-radius:3px;background:var(--red);vertical-align:-1px}
+.key.on{width:7px;height:7px;border-radius:50%;background:var(--dot);vertical-align:1px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;margin:0}
 [hidden]{display:none!important}
 </style>
@@ -54,7 +64,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   <div id="notes" class="notes" hidden></div>
   <div id="unmatched" class="bar" hidden></div>
   <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
-  <p class="foot">Red = waits on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <p class="foot"><span class="key"></span> waits on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
   <div id="skillBox" hidden><p class="foot">Copying was blocked. Select and copy this:</p><pre id="skillText"></pre></div>
 </div>
 
@@ -83,18 +93,19 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
   function chip(t){
     const red = isRed(t), label = t.label || "Thread";
-    const title = red ? "Waits on you" + (waitText(t) ? ":\n" + waitText(t) : "") : (isActive(t) ? "Claude is on it" : "Nothing needed");
-    const kids = [isActive(t) && !red ? el("span",{class:"d"}) : null, label];
-    return safe(t.url) ? el("a",{class:"t" + (red ? " red" : ""),href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
-                       : el("span",{class:"t" + (red ? " red" : ""),title:title + " (no link yet)"}, ...kids);
+    const title = red ? "Waits on you" + (waitText(t) ? ":\n" + waitText(t) : "") : "Nothing needed";
+    const cls = "t" + (red ? " red" : "");
+    const kids = [el("span",{class:"m","aria-hidden":"true",}), el("span",{class:"l",text:label})];
+    return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
+                       : el("span",{class:cls,title:title + " (no link yet)"}, ...kids);
   }
   // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
   const projectUrl = p => { const m = arr(p.threads).map(t => /^(https:\/\/claude\.ai\/code\/project\/[A-Za-z0-9_-]+)\?thread=/.exec(String(t && t.url || ""))).find(Boolean); return m ? m[1] : (safe(p.url) ? p.url : ""); };
 
   function tile(p){
-    const ths = arr(p.threads).filter(t => t && (safe(t.url) || t.label)), hot = ths.some(isRed);
+    const ths = arr(p.threads).filter(t => t && (safe(t.url) || t.label));
     const u = projectUrl(p), nm = p.name || p.id;
-    const c = el("div",{class:"tile" + (hot ? " hot" : "")}, u ? el("a",{class:"name",href:u,target:"_blank",rel:"noopener",title:"Open this project",text:nm}) : el("span",{class:"name",text:nm}));
+    const c = el("div",{class:"tile"}, u ? el("a",{class:"name",href:u,target:"_blank",rel:"noopener",title:"Open this project",text:nm}) : el("span",{class:"name",text:nm}));
     ths.forEach(t => c.append(chip(t)));
     if (!ths.length) c.append(el("span",{class:"none",text:"no threads"}));
     return c;
@@ -112,7 +123,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       b.append(el("h2",{text:sec.label}), g);
     });
     const n = projects.flatMap(p => arr(p.threads)).filter(t => t && isRed(t)).length;
-    $("count").textContent = n ? n + " need" + (n === 1 ? "s" : "") + " you" : "nothing needs you";
+    $("count").textContent = n ? n + " thread" + (n === 1 ? " waits" : "s wait") + " on you" : "Nothing waits on you";
     $("count").classList.toggle("hot", n > 0);
     $("ver").textContent = "v" + VERSION;
   }
