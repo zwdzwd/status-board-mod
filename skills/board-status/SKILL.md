@@ -22,7 +22,7 @@ is deferred. Its rules are the "rules" field of collection meta, doc_id instruct
 2. **Approve the session's board writes.** In auto mode the Status Board mod's own writes are refused
    until this session has written to the board once. Write this thread's check-in record: `get`
    collection "checkins", doc_id = this thread's id from step 1 (or, if the listing did not name it,
-   the session id the mod's note gives); then `set` it to `{"at": "<ISO now>"}`, passing its version
+   the session id the mod's note gives); then `set` it to `{"at": "<ISO now>", "threads": <the number of open threads the step 1 listing returned>}`, passing its version
    as if_version when it exists.
 3. **Report.** Find this project's card (`list` collection "projects"; it is the card whose threads
    include this thread's link or session) and tell the user in one line that the thread is on it and its
