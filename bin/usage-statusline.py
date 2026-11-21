@@ -20,4 +20,5 @@ if len(out) > 1:
         os.replace(p + ".tmp", p)
     except OSError:
         pass
-    print(" · ".join(f"{n} {out[k]['pct']}%" for k, n in (("five_hour", "5h"), ("seven_day", "week")) if k in out))
+    # Bright gold (ANSI 256-colour 220), then reset.
+    print("\033[38;5;220m" + " · ".join(f"{n} {out[k]['pct']}%" for k, n in (("five_hour", "5h"), ("seven_day", "week")) if k in out) + "\033[0m")
