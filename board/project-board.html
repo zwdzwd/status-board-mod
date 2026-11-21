@@ -87,7 +87,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   // The footer scale: the same log-time mapping the markers use, with ticks at familiar times.
   queueMicrotask(() => { const h = $("heat"), k = $("ticks"); if (!h || !k) return;
     h.style.background = "linear-gradient(90deg," + Array.from({length: 11}, (_, i) => heatAt(i / 10) + " " + (i * 10) + "%").join(",") + ")";
-    [["now",0],["5 min",5/60],["1 hr",1],["12 hr",12],["24 hr",24],["1 week",168],["2 weeks+",336]].forEach(([t, hr]) => {
+    [["now",0],["5 min",5/60],["1 hr",1],["12 hr",12],["24 hr",24],["1 week",168]].forEach(([t, hr]) => {
       const s = document.createElement("span"); s.textContent = t; s.style.left = (pos(hr) * 100) + "%"; k.append(s); }); });
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
     if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
