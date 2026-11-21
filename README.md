@@ -31,7 +31,7 @@ Five parts, one version number (`VERSION`; the same string is in
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
   `user`). Each project is a tile of thread links; a link's marker is coloured by when the user
-  last opened that thread from the board (red recent, blue long ago or never); a small ❄ beside a link cools it back to blue without opening it, for a casual look that was not a real visit. After a change,
+  last opened that thread from the board (red recent, blue long ago or never); a small ❄ beside a link snoozes it (back to blue) without opening it, for a casual look that was not a real visit. After a change,
   publish it to that same URL.
 - **The rules** (`board/rules.md`): what every project's Claude reads from the board
   (`meta/instruction` in the board's database, field `rules`). After a change, write it

@@ -127,7 +127,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       link.addEventListener("click", () => markOpened(t));
       // A small button beside the link cools the thread back to blue without opening it, for a casual look
       // that was not a real visit.
-      const snooze = el("button",{class:"snz",type:"button",title:"Cool down: set this thread back to blue without opening it","aria-label":"Cool down " + label}, "\u2744");
+      const snooze = el("button",{class:"snz",type:"button",title:"Snooze: set this thread back to blue without opening it","aria-label":"Snooze " + label}, "\u2744");
       snooze.addEventListener("click", () => { markOpened(t, COOL); render(); });
       return el("div",{class:"trow"}, link, snooze);
     }
