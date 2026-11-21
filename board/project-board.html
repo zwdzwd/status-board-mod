@@ -71,7 +71,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   <div id="notes" class="notes" hidden></div>
   <div id="unmatched" class="bar" hidden></div>
   <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
-  <p class="foot">Each thread link is coloured by time since it last reported: the marker runs from red for recent to blue for older. Colour says nothing about whether a thread is running or waiting on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <p class="foot">Each marker is coloured by when you last opened that thread from this board: red for recent, through to blue for longest ago or never. Colour says nothing about whether a thread is running or waiting on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
   <div class="scale" aria-hidden="true"><div class="heat" id="heat"></div><div class="ticks" id="ticks"></div></div>
   <div id="skillBox" hidden><p class="foot">Copying was blocked. Select and copy this:</p><pre id="skillText"></pre></div>
 </div>
@@ -99,7 +99,10 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
   // How long since the thread last reported (the plugin stamps "at" every turn): 0 today, 1 within 3 days,
   // 2 within a week, 3 older or never.
-  const ageOf = t => { const ms = Date.now() - Date.parse(t.at || ""); return isNaN(ms) ? 3 : ms < 864e5 ? 0 : ms < 3*864e5 ? 1 : ms < 7*864e5 ? 2 : 3; };
+  // Last time each thread link was opened from this board (collection "clicks", one document per thread id).
+  let clicks = {};
+  const tidOf = t => { const m = /thread=(cmsg_[A-Za-z0-9]+)/.exec(String(t && t.url || "")); return m ? m[1] : ""; };
+  const ageOf = t => { const ms = Date.now() - Date.parse(clicks[tidOf(t)] || ""); return isNaN(ms) ? 3 : ms < 864e5 ? 0 : ms < 3*864e5 ? 1 : ms < 7*864e5 ? 2 : 3; };
   const ago = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return isNaN(h) ? "Never reported: this thread's plugin has not written to the board (not installed, out of date, or its writes are refused)" : "Last active " + (h < 1 ? "within the hour" : h < 48 ? Math.round(h) + "h ago" : Math.round(h / 24) + " days ago"); };
   // Turbo colour by age: red just now, through yellow and green, to blue at two weeks or more (log minutes).
   const turbo = x => { const c = a => Math.round(255 * Math.max(0, Math.min(1, a.reduceRight((v, k) => v * x + k, 0))));
@@ -110,11 +113,17 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   const pos = h => Math.min(1, Math.log1p(Math.max(0, h) * 60) / Math.log1p(336 * 60));   // log minutes, two weeks = 1
   const heat = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return heatAt(isNaN(h) ? 1 : pos(h)); };
   function chip(t){
-    const label = t.label || "Thread", title = ago(t.at), cls = "t";
-    const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(t.at);
+    const label = t.label || "Thread", cls = "t";
+    const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(clicks[tidOf(t)]);
     const kids = [m, el("span",{class:"l",text:label})];
-    return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
-                       : el("span",{class:cls,title:title + " (no link yet)"}, ...kids);
+    return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label,onclick:() => markOpened(t)}, ...kids)
+                       : el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
+  }
+  // Record that this thread was opened from the board (a per-thread document; no thread has to report).
+  async function markOpened(t){
+    const id = tidOf(t); if (!id) return;
+    const at = new Date().toISOString(); clicks[id] = at;
+    try { await dbRef.collection("clicks").doc(id).set({at}); } catch(e){}
   }
   // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
   const projectUrl = p => { const m = arr(p.threads).map(t => /^(https:\/\/claude\.ai\/code\/project\/[A-Za-z0-9_-]+)\?thread=/.exec(String(t && t.url || ""))).find(Boolean); return m ? m[1] : (safe(p.url) ? p.url : ""); };
@@ -139,9 +148,9 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       const g = el("div",{class:"grid"}); rows.forEach(p => g.append(tile(p)));
       b.append(el("h2",{text:sec.label}), g);
     });
-    const n = projects.flatMap(p => arr(p.threads)).filter(t => t && ageOf(t) === 0).length;
-    const nr = projects.flatMap(p => arr(p.threads)).filter(t => t && !t.at).length;
-    $("count").textContent = n + " thread" + (n === 1 ? "" : "s") + " active today" + (nr ? " · " + nr + " never reported" : "");
+    const all = projects.flatMap(p => arr(p.threads)).filter(t => t);
+    const n = all.filter(t => ageOf(t) === 0).length, never = all.filter(t => !clicks[tidOf(t)]).length;
+    $("count").textContent = n + " thread" + (n === 1 ? "" : "s") + " opened today" + (never ? " · " + never + " not yet opened" : "");
     $("ver").textContent = "v" + VERSION;
   }
 
@@ -188,6 +197,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     if (!db){ $("board").replaceChildren(el("p",{class:"none",text:"Sign in to claude.ai to see your status board."})); return; }
     $("notesBtn").onclick = () => { notesOpen = !notesOpen; try { localStorage.setItem("sb-notes", notesOpen ? "1" : "0"); } catch(e){} renderNotes(); };
     db.collection("messages").onSnapshot(s => { messages = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); renderNotes(); }, () => {});
+    db.collection("clicks").onSnapshot(sn => { clicks = {}; sn.docs.forEach(d => { if (d.exists) clicks[d.id] = (d.data() || {}).at; }); render(); }, () => {});
     db.collection("unmatched").onSnapshot(s => renderUnmatched(s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(s => { projects = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); render(); renderNotes(); },
       err => { $("board").replaceChildren(el("p",{class:"none",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload to try again."})); });
