@@ -116,8 +116,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const label = t.label || "Thread", cls = "t";
     const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(clicks[tidOf(t)]);
     const kids = [m, el("span",{class:"l",text:label})];
-    return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label,onclick:() => markOpened(t)}, ...kids)
-                       : el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
+    if (safe(t.url)) { const link = el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label}, ...kids); link.addEventListener("click", () => markOpened(t)); return link; }
+    return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
   }
   // Record that this thread was opened from the board (a per-thread document; no thread has to report).
   async function markOpened(t){
