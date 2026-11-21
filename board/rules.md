@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.15.7
+# Status Board rules (meta/instruction) — v0.15.8
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -95,24 +95,12 @@ it finishes.
 - Set the card's repo field once to this repository's owner/name (from
   git remote). The mod uses it only as a tie-break, for a card that
   holds no other project's threads.
-- The board shows only each card's name and its threads as links, red when a
-  thread waits on me. Do not spend turns updating summary, next or blocker:
-  the board no longer shows them. Write a card only to create it, or when I ask
-  ("update the board"): read it, then write ONLY my card, pinned to the version
-  read (on a version mismatch, re-read and write once more). Fields:
+- The board shows only each card's name and its threads as links. Write a
+  card only to create it, or when I ask ("update the board"): read it, then
+  write ONLY my card, pinned to the version read (on a version mismatch,
+  re-read and write once more). Fields:
   - name: project name
   - repo: owner/name of the git remote
-  - status: the card's own fallback, same values as a thread's
-    (threads decide the color when they have one)
-  - summary: one sentence on where it stands, at most 20 words (the
-    card shows two short lines; longer text is cut off)
-  - next: the single next step, at most 12 words, or "" if there is
-    none. When the project is waiting on someone other than me, say so
-    here, naming them: "Waiting on Hao: commit S2a and 3b".
-  - blocker: only what is waiting on ME (a decision, a review, an
-    answer), at most 12 words, or "" if nothing is. Write it as a bare
-    imperative, without my name or "waiting on": "Pick the Fig 2
-    layout". Never put someone else's task here.
   - threads: [{label, url, session, transcript, status, at, jobs,
     asks?, waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the

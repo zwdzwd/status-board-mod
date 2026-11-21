@@ -110,8 +110,8 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
 
 ## How it fits together
 
-- Card = one document in `projects/<id>` on the board: name, repo, category, status,
-  summary, next, blocker, threads[], updated.
+- Card = one document in `projects/<id>` on the board: name, repo, category, threads[],
+  updated.
 - Thread entry = `{label, url, session, transcript, status, at, jobs, asks?, waiting?, ended?}`:
   `session` is the remote session id (`cse_…`) the project's tools use, `transcript` the CLI
   session id. The thread's own session writes its status and jobs; `/board-status` in any
