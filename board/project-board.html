@@ -33,6 +33,11 @@ h2::after{content:"";flex:1;border-top:1px solid var(--line)}
 .tile{break-inside:avoid;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 6px 6px;margin:0 0 10px;display:flex;flex-direction:column;gap:1px;min-width:0}
 .name{font-weight:700;font-size:14px;letter-spacing:-.01em;color:var(--fg);text-decoration:none;padding:0 6px 4px;overflow-wrap:anywhere}
 a.name:hover{text-decoration:underline;text-underline-offset:2px}
+.trow{display:flex;align-items:flex-start;gap:2px;min-width:0}
+.trow>.t{flex:1}
+.snz{flex:none;font:inherit;font-size:11px;line-height:1;margin-top:3px;padding:3px 6px;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer;opacity:.35}
+.trow:hover .snz,.snz:focus-visible{opacity:1}
+.snz:hover{background:var(--hover);color:var(--fg)}
 .t{display:flex;align-items:flex-start;gap:8px;padding:3px 6px;border-radius:6px;color:var(--fg2);text-decoration:none;min-width:0}
 a.t:hover{background:var(--hover);color:var(--fg)}
 .t .l{min-width:0;overflow-wrap:anywhere}
@@ -77,7 +82,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
 <script>
 (function(){
-  const VERSION = "0.15.8";   // one version for board, mod and rules; bump all together
+  const VERSION = "0.15.9";   // one version for board, mod and rules; bump all together
   const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
@@ -120,7 +125,10 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       // The link opens normally; the click is noted at once in this browser (it survives the page closing)
       // and sent to the board's database, so a click into another project is kept even if the page unloads.
       link.addEventListener("click", () => markOpened(t));
-      return link;
+      // A small button beside the link marks the thread "checked now" without opening it (snooze).
+      const snooze = el("button",{class:"snz",type:"button",title:"Mark as checked now, without opening (no need to look again soon)","aria-label":"Mark " + label + " as checked now"}, "\u2713");
+      snooze.addEventListener("click", () => { markOpened(t); render(); });
+      return el("div",{class:"trow"}, link, snooze);
     }
     return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
   }
