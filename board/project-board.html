@@ -124,7 +124,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const id = tidOf(t); if (!id) return;
     const at = new Date().toISOString(); clicks[id] = at;
     try { await dbRef.doc("clicks/" + id).set({at}); }
-    catch (e) { try { await dbRef.doc("clicks/" + id).update({at}); } catch (e2) { $("ver").textContent = "v" + VERSION + " · click not saved"; } }
+    catch (e) { try { await dbRef.doc("clicks/" + id).update({at}); } catch (e2) { $("ver").textContent = "v" + VERSION + " · click not saved: " + String((e2 && e2.message) || e2 || "").slice(0, 160); } }
   }
   // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
   const projectUrl = p => { const m = arr(p.threads).map(t => /^(https:\/\/claude\.ai\/code\/project\/[A-Za-z0-9_-]+)\?thread=/.exec(String(t && t.url || ""))).find(Boolean); return m ? m[1] : (safe(p.url) ? p.url : ""); };
