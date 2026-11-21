@@ -41,6 +41,7 @@ a.t:hover{background:var(--hover);color:var(--fg)}
 /* Recency: the marker takes a turbo colour by age; bold when active today, fading after 3 days and a week. */
 .t .m{border-radius:4px}
 .t .m::before{content:none}
+.t .md{margin-left:auto;padding-left:8px;flex:none;font-size:10.5px;color:var(--muted);font-weight:400;white-space:nowrap}
 .t .m.nr{background:transparent;border:1.5px dashed var(--muted)}
 .t.a0{color:var(--fg);font-weight:600}
 .t.a2{opacity:.6}
@@ -81,7 +82,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
 <script>
 (function(){
-  const VERSION = "0.15.2";   // one version for board, mod and rules; bump all together
+  const VERSION = "0.15.3";   // one version for board, mod and rules; bump all together
   const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
@@ -112,10 +113,12 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   const heatAt = f => turbo(0.92 - 0.8 * f);
   const pos = h => Math.min(1, Math.log1p(Math.max(0, h) * 60) / Math.log1p(336 * 60));   // log minutes, two weeks = 1
   const heat = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return heatAt(isNaN(h) ? 1 : pos(h)); };
+  // "opus-5-5" -> "opus 5.5", "haiku-5-5" -> "haiku 5.5"; anything else shown as is.
+  const shortModel = m => { const x = /^([a-z]+)-(\d+)-(\d+)/.exec(m); return x ? x[1] + " " + x[2] + "." + x[3] : m; };
   function chip(t){
-    const label = t.label || "Thread", title = ago(t.at), cls = "t a" + ageOf(t);
+    const label = t.label || "Thread", title = ago(t.at) + (t.model ? " · " + t.model : ""), cls = "t a" + ageOf(t);
     const m = el("span",{class:"m","aria-hidden":"true"}); if (t.at) m.style.background = heat(t.at); else m.classList.add("nr");
-    const kids = [m, el("span",{class:"l",text:label})];
+    const kids = [m, el("span",{class:"l",text:label}), t.model ? el("span",{class:"md",text:shortModel(t.model)}) : null];
     return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
                        : el("span",{class:cls,title:title + " (no link yet)"}, ...kids);
   }

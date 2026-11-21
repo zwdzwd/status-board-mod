@@ -472,6 +472,15 @@ console.log('Y. the board address comes from the board skill (or its old name), 
   await E.fire('session.start', {}); await settle()
   ok(E.entry('methscope') && (await E.note()).includes(BOARD), 'no skill on disk: the built-in board') }
 
+console.log('Z. the card entry carries the model that wrote the latest reply, read from the transcript')
+{ const T = '/u/.claude/projects/-home-x/' + U + '.jsonl'
+  const files = { [T]: { text: '{"message":{"model":"claude-opus-5-5[1m]"}}\n{"message":{"model":"<synthetic>"}}\n{"message":{"model":"claude-sonnet-5-5"}}\n', at: 1 } }
+  const E = await env({ db: card([{ label: 'HPC', session: R }]), home: '/u', files })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'Done.', reason: 'answer' }); await settle()
+  ok(E.entry('methscope').model === 'sonnet-5-5', 'latest real model, without the claude- prefix: ' + E.entry('methscope').model) }
+
 console.log('T. the thread\'s "Waiting on you" line is the entry\'s asks; only the thread changes it; written only with status writes')
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
   await E.fire('session.start', {}); await settle()
