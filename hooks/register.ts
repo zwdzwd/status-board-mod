@@ -728,7 +728,7 @@ async function init($: Engine): Promise<void> {
       say($, 'board: no ArtifactData tool in this session')
     } else {
       if (remoteId && lastError) report = `the Status Board mod could not read the board (${lastError})`
-      say($, 'board: no card matched this chat yet')
+      if (!remoteId) say($, 'board: no card matched this chat yet')   // a terminal session is not on the board: say nothing
     }
   } catch (err) {
     if (noBoard) report = 'this chat has no ArtifactData tool, so its status will not appear on the Status Board'
