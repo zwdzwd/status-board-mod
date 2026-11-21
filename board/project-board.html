@@ -44,7 +44,13 @@ a.t:hover{background:var(--hover);color:var(--fg)}
 .t.a0{color:var(--fg);font-weight:600}
 .t.a2{opacity:.6}
 .t.a3{opacity:.35}
-.heat{display:inline-block;width:72px;height:9px;border-radius:3px;vertical-align:-1px;margin:0 4px}
+.scale{width:min(100%,560px);margin:2px 0 0}
+.heat{height:12px;border-radius:4px}
+.ticks{position:relative;height:28px;font-size:11px;color:var(--muted)}
+.ticks span{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap;padding-top:6px}
+.ticks span::before{content:"";position:absolute;top:0;left:50%;height:5px;border-left:1px solid var(--muted)}
+.ticks span:first-child{transform:none}.ticks span:first-child::before{left:0}
+.ticks span:last-child{transform:translateX(-100%)}.ticks span:last-child::before{left:auto;right:0}
 span.t{opacity:.7}
 .t:focus-visible,.name:focus-visible,.lb:focus-visible{outline:2px solid var(--dot);outline-offset:1px}
 .none{color:var(--muted);padding:0 6px}
@@ -67,7 +73,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   <div id="notes" class="notes" hidden></div>
   <div id="unmatched" class="bar" hidden></div>
   <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
-  <p class="foot">Marker colour shows last activity: now<span class="heat" id="heat"></span>two weeks. Bold means today. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <p class="foot">Marker colour shows how long ago a thread was last active; bold means today. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <div class="scale" aria-hidden="true"><div class="heat" id="heat"></div><div class="ticks" id="ticks"></div></div>
   <div id="skillBox" hidden><p class="foot">Copying was blocked. Select and copy this:</p><pre id="skillText"></pre></div>
 </div>
 
@@ -79,7 +86,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
   const catKey = c => { const k = String(c || "").toLowerCase().trim(); const a = CAT_ALIAS[k] || k; return SECTIONS.some(s => s.key === a) ? a : "paper"; };
   const $ = id => document.getElementById(id);
-  queueMicrotask(() => { const h = $("heat"); if (h) h.style.background = "linear-gradient(90deg," + [0, .1, .25, .45, .7, 1].map(f => heatAt(f)).join(",") + ")"; });
+  // The footer scale: the same log-time mapping the markers use, with ticks at familiar times.
+  queueMicrotask(() => { const h = $("heat"), k = $("ticks"); if (!h || !k) return;
+    h.style.background = "linear-gradient(90deg," + Array.from({length: 11}, (_, i) => heatAt(i / 10) + " " + (i * 10) + "%").join(",") + ")";
+    [["now",0],["5 min",5/60],["1 hr",1],["12 hr",12],["24 hr",24],["1 week",168],["2 weeks+",336]].forEach(([t, hr]) => {
+      const s = document.createElement("span"); s.textContent = t; s.style.left = (pos(hr) * 100) + "%"; k.append(s); }); });
   const el = (tag, attrs, ...kids) => { const n = document.createElement(tag);
     if (attrs) for (const k in attrs){ if (k === "class") n.className = attrs[k]; else if (k === "text") n.textContent = attrs[k]; else n.setAttribute(k, attrs[k]); }
     for (const k of kids) if (k != null) n.append(k); return n; };
@@ -92,13 +103,14 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   // 2 within a week, 3 older or never.
   const ageOf = t => { const ms = Date.now() - Date.parse(t.at || ""); return isNaN(ms) ? 3 : ms < 864e5 ? 0 : ms < 3*864e5 ? 1 : ms < 7*864e5 ? 2 : 3; };
   const ago = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return isNaN(h) ? "No activity recorded" : "Last active " + (h < 1 ? "within the hour" : h < 48 ? Math.round(h) + "h ago" : Math.round(h / 24) + " days ago"); };
-  // Turbo colour by age: red just now, through yellow and green, to blue at two weeks or more (log time).
+  // Turbo colour by age: red just now, through yellow and green, to blue at two weeks or more (log minutes).
   const turbo = x => { const c = a => Math.round(255 * Math.max(0, Math.min(1, a.reduceRight((v, k) => v * x + k, 0))));
     return "rgb(" + c([0.13572138,4.61539260,-42.66032258,132.13108234,-152.94239396,59.28637943]) + "," +
       c([0.09140261,2.19418839,4.84296658,-14.18503333,4.27729857,2.82956604]) + "," +
       c([0.10667330,12.64194608,-60.58204836,110.36276771,-89.90310912,27.34824973]) + ")"; };
   const heatAt = f => turbo(0.92 - 0.8 * f);
-  const heat = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return heatAt(isNaN(h) ? 1 : Math.min(1, Math.log1p(Math.max(0, h)) / Math.log1p(336))); };
+  const pos = h => Math.min(1, Math.log1p(Math.max(0, h) * 60) / Math.log1p(336 * 60));   // log minutes, two weeks = 1
+  const heat = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return heatAt(isNaN(h) ? 1 : pos(h)); };
   function chip(t){
     const label = t.label || "Thread", title = ago(t.at), cls = "t a" + ageOf(t);
     const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(t.at);
