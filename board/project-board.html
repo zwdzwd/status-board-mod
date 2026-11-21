@@ -118,25 +118,22 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const kids = [m, el("span",{class:"l",text:label})];
     if (safe(t.url)) {
       const link = el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label}, ...kids);
-      // Opening a thread in another project can unload this page before the save lands, so the save starts on
-      // pointerdown, and the click waits for it (up to 1.5 s) before letting the link open.
-      let saving = null, saved = false;
-      const start = () => { if (!saving) saving = markOpened(t).then(() => { saved = true; }); return saving; };
-      link.addEventListener("pointerdown", start);
-      link.addEventListener("click", ev => {
-        if (saved || link.dataset.go) { delete link.dataset.go; return; }
-        ev.preventDefault();
-        Promise.race([start(), new Promise(r => setTimeout(r, 1500))]).then(() => { link.dataset.go = "1"; link.click(); });
-      });
+      // The link opens normally; the click is noted at once in this browser (it survives the page closing)
+      // and sent to the board's database, so a click into another project is kept even if the page unloads.
+      link.addEventListener("click", () => markOpened(t));
       return link;
     }
     return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
   }
   // Record that this thread was opened from the board (a per-thread document; no thread has to report).
+  const PENDING = "sb-pending-clicks";
+  const pending = () => { try { return JSON.parse(localStorage.getItem(PENDING) || "{}"); } catch (e) { return {}; } };
+  const setPending = o => { try { localStorage.setItem(PENDING, JSON.stringify(o)); } catch (e) {} };
   async function markOpened(t){
     const id = tidOf(t); if (!id) return;
     const at = new Date().toISOString(); clicks[id] = at;
-    try { await dbRef.doc("clicks/" + id).set({at}); }
+    const p = pending(); p[id] = at; setPending(p);
+    try { await dbRef.doc("clicks/" + id).set({at}); const q = pending(); if (q[id] === at) { delete q[id]; setPending(q); } }
     catch (e) { try { await dbRef.doc("clicks/" + id).update({at}); } catch (e2) { $("ver").textContent = "v" + VERSION + " · click not saved: " + String((e2 && e2.message) || e2 || "").slice(0, 160); } }
   }
   // The project's threads view, taken from a thread link (https://claude.ai/code/project/<id>?thread=...).
@@ -211,7 +208,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     if (!db){ $("board").replaceChildren(el("p",{class:"none",text:"Sign in to claude.ai to see your status board."})); return; }
     $("notesBtn").onclick = () => { notesOpen = !notesOpen; try { localStorage.setItem("sb-notes", notesOpen ? "1" : "0"); } catch(e){} renderNotes(); };
     db.collection("messages").onSnapshot(s => { messages = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); renderNotes(); }, () => {});
-    db.collection("clicks").onSnapshot(sn => { clicks = {}; sn.docs.forEach(d => { if (d.exists) clicks[d.id] = (d.data() || {}).at; }); render(); }, () => {});
+    // Clicks noted in this browser but not yet saved (the page closed first): send them now.
+    { const p = pending(); for (const id of Object.keys(p)) { clicks[id] = p[id];
+        db.doc("clicks/" + id).set({at: p[id]}).then(() => { const q = pending(); if (q[id] === p[id]) { delete q[id]; setPending(q); } }).catch(() => {}); } }
+    db.collection("clicks").onSnapshot(sn => { clicks = {}; sn.docs.forEach(d => { if (d.exists) clicks[d.id] = (d.data() || {}).at; });
+      const p = pending(); for (const id of Object.keys(p)) if (!clicks[id] || p[id] > clicks[id]) clicks[id] = p[id]; render(); }, () => {});
     db.collection("unmatched").onSnapshot(s => renderUnmatched(s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(s => { projects = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); render(); renderNotes(); },
       err => { $("board").replaceChildren(el("p",{class:"none",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload to try again."})); });
