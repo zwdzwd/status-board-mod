@@ -82,7 +82,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
 <script>
 (function(){
-  const VERSION = "0.15.9";   // one version for board, mod and rules; bump all together
+  const VERSION = "0.15.10";   // one version for board, mod and rules; bump all together
   const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
@@ -125,9 +125,10 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       // The link opens normally; the click is noted at once in this browser (it survives the page closing)
       // and sent to the board's database, so a click into another project is kept even if the page unloads.
       link.addEventListener("click", () => markOpened(t));
-      // A small button beside the link marks the thread "checked now" without opening it (snooze).
-      const snooze = el("button",{class:"snz",type:"button",title:"Mark as checked now, without opening (no need to look again soon)","aria-label":"Mark " + label + " as checked now"}, "\u2713");
-      snooze.addEventListener("click", () => { markOpened(t); render(); });
+      // A small button beside the link cools the thread back to blue without opening it, for a casual look
+      // that was not a real visit.
+      const snooze = el("button",{class:"snz",type:"button",title:"Cool down: set this thread back to blue without opening it","aria-label":"Cool down " + label}, "\u2744");
+      snooze.addEventListener("click", () => { markOpened(t, COOL); render(); });
       return el("div",{class:"trow"}, link, snooze);
     }
     return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
@@ -136,9 +137,11 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   const PENDING = "sb-pending-clicks";
   const pending = () => { try { return JSON.parse(localStorage.getItem(PENDING) || "{}"); } catch (e) { return {}; } };
   const setPending = o => { try { localStorage.setItem(PENDING, JSON.stringify(o)); } catch (e) {} };
-  async function markOpened(t){
+  // markOpened(t): the link was opened now. markOpened(t, COOL): cool the thread back to blue without opening it.
+  const COOL = "1970-01-01T00:00:00.000Z";
+  async function markOpened(t, when){
     const id = tidOf(t); if (!id) return;
-    const at = new Date().toISOString(); clicks[id] = at;
+    const at = when || new Date().toISOString(); clicks[id] = at;
     const p = pending(); p[id] = at; setPending(p);
     try { await dbRef.doc("clicks/" + id).set({at}); const q = pending(); if (q[id] === at) { delete q[id]; setPending(q); } }
     catch (e) { try { await dbRef.doc("clicks/" + id).update({at}); } catch (e2) { $("ver").textContent = "v" + VERSION + " · click not saved: " + String((e2 && e2.message) || e2 || "").slice(0, 160); } }
@@ -219,7 +222,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     { const p = pending(); for (const id of Object.keys(p)) { clicks[id] = p[id];
         db.doc("clicks/" + id).set({at: p[id]}).then(() => { const q = pending(); if (q[id] === p[id]) { delete q[id]; setPending(q); } }).catch(() => {}); } }
     db.collection("clicks").onSnapshot(sn => { clicks = {}; sn.docs.forEach(d => { if (d.exists) clicks[d.id] = (d.data() || {}).at; });
-      const p = pending(); for (const id of Object.keys(p)) if (!clicks[id] || p[id] > clicks[id]) clicks[id] = p[id]; render(); }, () => {});
+      const p = pending(); for (const id of Object.keys(p)) if (!clicks[id] || p[id] > clicks[id] || p[id] === COOL) clicks[id] = p[id]; render(); }, () => {});
     db.collection("unmatched").onSnapshot(s => renderUnmatched(s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data()))), () => {});
     db.collection("projects").onSnapshot(s => { projects = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); render(); renderNotes(); },
       err => { $("board").replaceChildren(el("p",{class:"none",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload to try again."})); });
