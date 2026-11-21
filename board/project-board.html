@@ -42,9 +42,6 @@ a.t:hover{background:var(--hover);color:var(--fg)}
 .t .m{border-radius:4px}
 .t .m::before{content:none}
 .t .m.nr{background:transparent;border:1.5px dashed var(--muted)}
-.t.a0{color:var(--fg);font-weight:600}
-.t.a2{opacity:.6}
-.t.a3{opacity:.35}
 .scale{width:min(100%,560px);margin:2px 0 0}
 .heat{height:12px;border-radius:4px}
 .ticks{position:relative;height:28px;font-size:11px;color:var(--muted)}
@@ -74,7 +71,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   <div id="notes" class="notes" hidden></div>
   <div id="unmatched" class="bar" hidden></div>
   <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
-  <p class="foot">Each thread link fades with time since it last reported: bold within 24 hours, normal within 3 days, dimmed after that, and most faded over a week or if it never reported. Fading says nothing about whether a thread is running or waiting on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
+  <p class="foot">Each thread link is coloured by time since it last reported: the marker runs from red for recent to blue for older. Colour says nothing about whether a thread is running or waiting on you. Start each session with <code>/board-status</code>. New machine: <a href="https://github.com/zwdzwd/status-board-mod#setting-up" target="_blank" rel="noopener">install the plugin</a>, then <button class="lb" id="skillBtn" type="button" disabled>copy the skill setup</button>. <span id="ver"></span></p>
   <div class="scale" aria-hidden="true"><div class="heat" id="heat"></div><div class="ticks" id="ticks"></div></div>
   <div id="skillBox" hidden><p class="foot">Copying was blocked. Select and copy this:</p><pre id="skillText"></pre></div>
 </div>
@@ -113,7 +110,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   const pos = h => Math.min(1, Math.log1p(Math.max(0, h) * 60) / Math.log1p(336 * 60));   // log minutes, two weeks = 1
   const heat = iso => { const h = (Date.now() - Date.parse(iso || "")) / 36e5; return heatAt(isNaN(h) ? 1 : pos(h)); };
   function chip(t){
-    const label = t.label || "Thread", title = ago(t.at), cls = "t a" + ageOf(t);
+    const label = t.label || "Thread", title = ago(t.at), cls = "t";
     const m = el("span",{class:"m","aria-hidden":"true"}); if (t.at) m.style.background = heat(t.at); else m.classList.add("nr");
     const kids = [m, el("span",{class:"l",text:label})];
     return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
