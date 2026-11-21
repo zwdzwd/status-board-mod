@@ -221,7 +221,7 @@ console.log('N2. a tool error mentioning ArtifactData does not switch the mod of
   ok(E.entry('methscope')?.status === 'thinking', 'recovers at the next turn: ' + E.entry('methscope')?.status) }
 
 console.log('N3. /clear with a write already queued and a slow board still moves the entry')
-{ const E = await env({ db: card([{ label: 'HPC', transcript: U }]), remote: '', latency: 40 })
+{ const E = await env({ db: card([{ label: 'HPC', transcript: U }]), remote: R, latency: 40 })
   await E.fire('session.start', {}); await new Promise(r => setTimeout(r, 400))
   await E.fire('turn.start', {})                       // queues "thinking" with the old id
   await E.fire('session.end', { reason: 'clear' })
@@ -430,8 +430,15 @@ console.log('N14. one-shot (-p) and local runs: no note, no registration')
   ok(!E.db.projects.methscope.threads.length, 'local session does not register')
   ok(!(await E.note(['print'])), 'no note in -p') }
 
+console.log('N11. a plain terminal session (no remote id) does no board work at all')
+{ const E = await env({ db: card([{ label: 'HPC', transcript: U }]), remote: '' })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Question?', reason: 'answer' }); await settle()
+  ok(E.writes.length === 0, 'no writes from a terminal session: ' + E.writes.length)
+  ok(!(await E.note()), 'no note from a terminal session') }
+
 console.log('N12. a /context render or an aborted turn does not count as telling the user')
-{ const E = await env({ noArtifactData: true, remote: '' })
+{ const E = await env({ noArtifactData: true, remote: R })
   await E.fire('session.start', {}); await settle()
   await E.note(['analysis']); await E.fire('turn.start', {}); await E.note(); await E.fire('turn.complete', { answer: '', reason: 'aborted' }); await settle()
   ok(/Tell the user/.test(await E.note()), 'still to be told') }

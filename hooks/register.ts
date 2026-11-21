@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.15.4'
+const VERSION = '0.15.5'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -779,6 +779,7 @@ function tell(count: boolean): string {
 const WHERE = () => ` (The Status Board is the artifact ${BOARD}, read and written with the ArtifactData tool; its rules are the "rules" field of collection meta, doc_id instruction.)`
 function boardNote(count: boolean): string {
   const v = `Status Board mod v${VERSION}`
+  if (!remoteId) return ''                                  // a plain terminal session: no note at all
   if (!initDone) return `${v}: looking up this chat on the Status Board.${remoteId ? ASK_STATUS : ''}`
   return noteBody(count, v) + WHERE()
 }
@@ -938,7 +939,9 @@ export const register: Register = on => {
     remoteId = await findRemoteId($)
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
     trace($, `session.start: remote ${remoteId || 'none'}, board ${BOARD}`)
-    if (sessionId) startInit($)
+    // A plain terminal session (no remote id) is not on the board: it does no board work at all.
+    if (!remoteId) noBoard = true
+    if (sessionId && remoteId) startInit($)
     else initDone = true
     return next(e)
   })
