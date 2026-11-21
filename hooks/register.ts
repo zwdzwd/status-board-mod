@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.15.5'
+const VERSION = '0.15.6'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -30,7 +30,7 @@ const PROJECT = /(^|__)(start_thread|start_thread_session|start_rc_session|list_
 type Job = { text: string; type: string; id: string }
 // One thing a thread waits on the user for.
 type Ask = { id: string; text: string; at: string; work?: string }
-type Thread = { model?: string; jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
+type Thread = { jobs?: Job[]; asks?: Ask[]; todo?: unknown; label?: string; url?: string; session?: string; transcript?: string; status?: string; at?: string; job?: string; waiting?: string; ended?: string }
 type Card = { id: string; version: number; data: Record<string, unknown> }
 type Found = { cardId: string; name: string; label: string }
 type ToolResult = { deny?: unknown; isError?: boolean; text?: string; result?: unknown; missing?: boolean }
@@ -38,9 +38,6 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 
 // ---- State of this session ----
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
-let modelNow = ''                        // the model that wrote this session's latest reply, read from its transcript
-let transcriptFile = ''
-let usageSent = ''                       // the last usage figures written to the board (meta/usage), to skip repeats
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
 let priorIds: string[] = []              // this chat's ids before a /clear, until its entry is moved
 let threadId = ''                        // this thread's cmsg_ id, once a listing has named it
@@ -373,7 +370,6 @@ function setStatus($: Engine, status: string, ended?: boolean, waiting?: string)
         if (status === 'waiting_on_you' && list && list.length) n.waiting = list[0]!.text
         if (!n.transcript) n.transcript = transcript               // fill in what the entry lacks
         if (!n.session && remote) n.session = remote
-        if (modelNow && n.model !== modelNow) n.model = modelNow
         if (jobsNow) { n.jobs = jobsNow; delete n.job }            // "job" was the old single job line
         if (list) { if (list.length) n.asks = list; else delete n.asks }
         else if (Array.isArray(n.asks) && status === 'thinking' && asksWork) n.asks = n.asks.map(a => ({ ...a, work: at }))
@@ -811,51 +807,6 @@ function describeChat(): string {
   return `Status Board: this chat is not on the board (transcript ${sessionId}${remoteId ? ', session ' + remoteId : ''}).${report ? ' ' + report + '.' : ''}`
 }
 
-// The model behind this session's latest reply: the transcript (<config dir>/projects/<cwd>/<session id>.jsonl)
-// records it on every assistant message. Read by the plugin itself, so it costs no tokens. Only the tail is looked at.
-async function readModel($: Engine): Promise<void> {
-  try {
-    let dir = ''
-    try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
-    if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
-    if (!dir || !sessionId) return
-    if (!transcriptFile || !transcriptFile.endsWith(`/${sessionId}.jsonl`)) {
-      transcriptFile = ''
-      for (const e of await $.fs.list(dir + '/projects')) {
-        const f = `${dir}/projects/${e.name}/${sessionId}.jsonl`
-        try { await $.fs.stat(f, { resolve: true }); transcriptFile = f; break } catch {}
-      }
-    }
-    if (!transcriptFile) return
-    const text = String(await $.fs.read(transcriptFile)).slice(-400000)
-    const all = [...text.matchAll(/"model":"([^"]+)"/g)].map(m => m[1]!).filter(m => m !== '<synthetic>')
-    const m = all[all.length - 1]
-    if (m) modelNow = m.replace(/^claude-/, '').replace(/\[.*\]$/, '')
-  } catch {}
-}
-
-// Account usage (5-hour and weekly percentages): a status line script saves them to <config dir>/usage.json
-// (bin/usage-statusline.py); this copies them to meta/usage when they change, for the board header.
-async function sendUsage($: Engine): Promise<void> {
-  try {
-    let dir = ''
-    try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
-    if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
-    if (!dir) return
-    const u = JSON.parse(String(await $.fs.read(dir + '/usage.json')))
-    const data: Record<string, unknown> = { at: now(), from: u.at ? new Date(Number(u.at) * 1000).toISOString() : now() }
-    for (const k of ['five_hour', 'seven_day']) if (u[k] && typeof u[k].pct === 'number') data[k] = { pct: u[k].pct, resets_at: u[k].resets_at ?? null }
-    if (!data.five_hour && !data.seven_day) return
-    const key = JSON.stringify([data.five_hour, data.seven_day])
-    if (key === usageSent) return
-    const d = await getDoc($, 'meta', 'usage')
-    const args: Record<string, unknown> = { action: 'set', collection: 'meta', doc_id: 'usage', data }
-    if (d) args.if_version = d.version
-    await call($, args)
-    usageSent = key
-  } catch {}
-}
-
 // What a turn's final message means for the board: a question or a decision for the user, or not.
 // What still runs is the jobs list's business.
 const ASK = 'the message asks the user a question, or waits for the user to decide, approve, confirm or provide something'
@@ -1032,7 +983,6 @@ export const register: Register = on => {
     composedReport = ''
     if (!sessionId) return out
     const seq = turnSeq
-    const modelRead = readModel($)           // started now, awaited just before the status write
     // What the user read this turn: a project thread's reply when it sent one, else the final answer.
     const answer = replyText || String(e.answer || '')
     replyText = ''
@@ -1058,8 +1008,6 @@ export const register: Register = on => {
         if (seq !== turnSeq) return
         if (!found) { await markUnmatched($); return }
         let d: { status: string; waiting?: string } = reason === 'answer' ? await decide($, answer) : { status: 'idle' }
-        await modelRead
-        void sendUsage($)
         // A turn that lists what waits on the user is waiting on the user, whatever the classifier said.
         if (asksSaid && asksSaid.length) d = { status: 'waiting_on_you', waiting: asksSaid[0] }
         if (seq !== turnSeq) return

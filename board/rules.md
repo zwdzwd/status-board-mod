@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.15.5
+# Status Board rules (meta/instruction) — v0.15.6
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -112,18 +112,15 @@ it finishes.
   - blocker: only what is waiting on ME (a decision, a review, an
     answer), at most 12 words, or "" if nothing is. Write it as a bare
     imperative, without my name or "waiting on": "Pick the Fig 2
-    layout". The board shows it
-    in red as "Waiting on you"; never put someone else's task here.
+    layout". Never put someone else's task here.
   - threads: [{label, url, session, transcript, status, at, jobs,
-    asks?, waiting?, ended?, conn?}], one
+    asks?, waiting?, ended?}], one
     entry per open thread of this project and nothing else. label = the
     thread's name as the project's thread list shows it. url = the
     thread's link. session = its Claude Code session id (cse_… or
     session_…). transcript = that session's UUID (the mod's note names
     it). The mod writes each thread's entry; /board-status in a thread
-    makes the list match the project's open threads and sets each
-    entry's conn ({state: online|offline|cloud|stopped, where?, since?,
-    checked}), the thread's connection as of that /board-status. No montage, artifact, repo, Zenodo or other links
+    makes the list match the project's open threads. No montage, artifact, repo, Zenodo or other links
     anywhere on the card: remove a links or montage field if present.
   - coordinator: a legacy field from older mods; leave it as it is.
   - category: paper | software | misc (grants, talks, personal work and

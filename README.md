@@ -21,18 +21,19 @@ Five parts, one version number (`VERSION`; the same string is in
   needs only the skill updated (the board's **Copy skill setup** button). Without the
   skill on disk it uses the address built into `hooks/register.ts`.
 - **The board-status skill** (`skills/board-status/`): `/board-status`, sent at the start of each
-  fresh session, makes the thread write once to the board (in auto mode that lets the plugin write
-  for the rest of the session), list the project's threads so the plugin can place the thread and
-  sync the card's thread list, and report what the card shows, writing each thread's connection (online, offline, cloud) onto the card and ending with a table of the project's
-  threads (connection, state, what each waits on the user for). `/board-info` shows what the
-  plugin itself sees.
+  fresh session, lists the project's threads (so the plugin can place this thread and sync the
+  card's thread list), writes one check-in to the board (in auto mode that lets the plugin write
+  for the rest of the session), and says in one line whether the thread is on a card.
+  `/board-info` shows what the plugin itself sees.
 - **The messaging skill** (`skills/status-board-messaging/`): ships with the plugin, so every
   session that has the plugin can send a note to another project or check its own mail through
   the board's "messages" collection. The plugin's per-turn note shows a thread how many notes
   wait for its project.
 - **The board page** (`board/project-board.html`): the source of the Status Board
   artifact (https://claude.ai/artifact/GKm8qjBy2aV85j85K29S4T, capabilities `db` and
-  `user`). After a change, publish it to that same URL.
+  `user`). Each project is a tile of thread links; a link's marker is coloured by when the user
+  last opened that thread from the board (red recent, blue long ago or never). After a change,
+  publish it to that same URL.
 - **The rules** (`board/rules.md`): what every project's Claude reads from the board
   (`meta/instruction` in the board's database, field `rules`). After a change, write it
   back there. Nothing needs pasting into a project's own instructions: the plugin's
@@ -117,12 +118,10 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
   session id. The thread's own session writes its status and jobs; `/board-status` in any
   thread makes the list match the project's open threads. Resolve threads rather than delete
   them.
-- Usage in the board header: `bin/usage-statusline.py` is a Claude Code status line script that
-  saves the account's 5-hour and weekly usage percentages to `~/.claude/usage.json`; the plugin
-  copies them to `meta/usage` when they change. Set it up once per machine with
-  `"statusLine": {"type": "command", "command": "python3 <repo>/bin/usage-statusline.py"}` in
-  `~/.claude/settings.json`. Only Pro and Max accounts get the figures, after a session's first reply.
 - Other collections: `sessions/<uuid>` (the plugin's index: which card and thread a session is),
   `unmatched/<uuid>` (threads the plugin could not place, shown on the board), `checkins/<thread
   id>` (the `/board-status` write that, in auto mode, lets the plugin write for the session),
-  `messages` (notes between projects) and `meta/instruction` (the rules).
+  `clicks/<thread id>` (when the user last opened that thread from the board; the page notes a click
+  in the browser first and resends it on the next load, since opening a thread in another project
+  can close the board before the save lands), `messages` (notes between projects) and
+  `meta/instruction` (the rules).
