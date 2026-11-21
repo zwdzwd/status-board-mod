@@ -113,7 +113,6 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const label = t.label || "Thread", title = ago(t.at), cls = "t";
     const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(t.at);
     const kids = [m, el("span",{class:"l",text:label})];
-    if (!t.at) kids.push(el("span",{class:"fine",text:"never reported"}));
     return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
                        : el("span",{class:cls,title:title + " (no link yet)"}, ...kids);
   }
