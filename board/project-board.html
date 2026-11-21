@@ -127,8 +127,8 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
       link.addEventListener("click", () => markOpened(t));
       // A small button beside the link cools the thread back to blue without opening it, for a casual look
       // that was not a real visit.
-      const snooze = el("button",{class:"snz",type:"button",title:"Snooze: set this thread back to blue without opening it","aria-label":"Snooze " + label}, "\u2744");
-      snooze.addEventListener("click", () => { markOpened(t, COOL); render(); });
+      const snooze = el("button",{class:"snz",type:"button",title:"Snooze: move this thread a third of the way toward blue, without opening it","aria-label":"Snooze " + label}, "\u2744");
+      snooze.addEventListener("click", () => { markOpened(t, coolTime(t)); render(); });
       return el("div",{class:"trow"}, link, snooze);
     }
     return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
@@ -137,6 +137,12 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
   const PENDING = "sb-pending-clicks";
   const pending = () => { try { return JSON.parse(localStorage.getItem(PENDING) || "{}"); } catch (e) { return {}; } };
   const setPending = o => { try { localStorage.setItem(PENDING, JSON.stringify(o)); } catch (e) {} };
+  // Each snooze moves a thread a third of the way along the colour scale toward blue (all the way is COOL).
+  function coolTime(t){
+    const h0 = (Date.now() - Date.parse(clicks[tidOf(t)] || "")) / 36e5, f = Math.min(1, (isNaN(h0) ? 1 : pos(h0)) + 0.33);
+    if (f >= 1) return COOL;
+    return new Date(Date.now() - (Math.exp(f * Math.log1p(336 * 60)) - 1) / 60 * 36e5).toISOString();
+  }
   // markOpened(t): the link was opened now. markOpened(t, COOL): cool the thread back to blue without opening it.
   const COOL = "1970-01-01T00:00:00.000Z";
   async function markOpened(t, when){
