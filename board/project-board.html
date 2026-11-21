@@ -41,6 +41,7 @@ a.t:hover{background:var(--hover);color:var(--fg)}
 /* Recency: the marker takes a turbo colour by age; bold when active today, fading after 3 days and a week. */
 .t .m{border-radius:4px}
 .t .m::before{content:none}
+.fine{font-size:10.5px;color:var(--muted);font-style:italic;margin-left:6px;white-space:nowrap}
 .t .m.nr{background:transparent;border:1.5px dashed var(--muted)}
 .scale{width:min(100%,560px);margin:2px 0 0}
 .heat{height:12px;border-radius:4px}
@@ -113,6 +114,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const label = t.label || "Thread", title = ago(t.at), cls = "t";
     const m = el("span",{class:"m","aria-hidden":"true"}); if (t.at) m.style.background = heat(t.at); else m.classList.add("nr");
     const kids = [m, el("span",{class:"l",text:label})];
+    if (!t.at) kids.push(el("span",{class:"fine",text:"never reported"}));
     return safe(t.url) ? el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title}, ...kids)
                        : el("span",{class:cls,title:title + " (no link yet)"}, ...kids);
   }
