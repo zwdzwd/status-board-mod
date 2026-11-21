@@ -437,6 +437,17 @@ console.log('N11. a plain terminal session (no remote id) does no board work at 
   ok(E.writes.length === 0, 'no writes from a terminal session: ' + E.writes.length)
   ok(!(await E.note()), 'no note from a terminal session') }
 
+console.log('P0. by default a turn writes nothing; a turn with the thread listing (/board-status) syncs the card')
+{ const E = await env({ db: card([{ label: 'HPC', session: R }]), perTurn: false })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await E.fire('turn.complete', { answer: 'Done.\n\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  ok(E.writes.filter(w => w.c === 'projects').length === 0, 'plain turn: no card write')
+  await E.fire('turn.start', {})
+  await E.fire('tool.call', { tool: 'mcp__hearthbot__list_threads' }, { text: JSON.stringify({ sessions: [{ session_id: R, thread_id: 'cmsg_ME', title: 'Me', status: 'active' }, { session_id: 'cse_NEW', thread_id: 'cmsg_NEW', title: 'New one', status: 'active' }] }) })
+  await E.fire('turn.complete', { answer: 'Synced.\n\nWaiting on you: nothing', reason: 'answer' }); await settle()
+  const th = E.db.projects.methscope.threads
+  ok(th.some(t => t.label === 'New one'), 'listing turn adds the new thread: ' + JSON.stringify(th.map(t => t.label))) }
+
 console.log('N12. a /context render or an aborted turn does not count as telling the user')
 { const E = await env({ noArtifactData: true, remote: R })
   await E.fire('session.start', {}); await settle()

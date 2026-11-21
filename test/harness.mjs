@@ -50,7 +50,7 @@ export function makeEnv(opts) {
       sleep: (ms, o) => new Promise((res, rej) => { const t = setTimeout(res, ms / 100); o?.signal?.addEventListener('abort', () => { clearTimeout(t); rej(new Error('aborted')) }) }),
       after: (ms, fn) => { const t = setTimeout(fn, ms / 100); return { cancel: () => clearTimeout(t) } },
     },
-    env: { get: async (n) => n === 'CLAUDE_CODE_REMOTE_SESSION_ID' ? (state.remote || undefined) : n === 'HOME' ? opts.home : undefined },
+    env: { get: async (n) => n === 'CLAUDE_CODE_REMOTE_SESSION_ID' ? (state.remote || undefined) : n === 'HOME' ? opts.home : n === 'STATUS_BOARD_PER_TURN' ? (opts.perTurn === false ? undefined : '1') : undefined },
     session: { id: async () => state.id, repo: async () => opts.repo || null, root: async () => opts.cwd || '/home/x', cwd: async () => opts.cwd || '/home/x' },
     ui: { status: (s) => statuses.push(s), invalidate: () => {} },
     model: { classify: async (t, labels) => { const k = typeof state.classify === 'function' ? await state.classify(t) : state.classify; return k === undefined ? undefined : labels[k] },

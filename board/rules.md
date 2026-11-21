@@ -1,4 +1,4 @@
-# Status Board rules (meta/instruction) — v0.15.6
+# Status Board rules (meta/instruction) — v0.15.7
 
 Source of the rules every project reads from the board. To change them, edit this file and write it back to meta/instruction (fields: rules, version, updated; the old `text` pointer is no longer used).
 
@@ -57,9 +57,9 @@ does the per-turn bookkeeping by itself:
     also names the entry and fills in its link. Otherwise add or edit a
     thread's entry by hand only when I ask; never invent a label, and
     keep ONE ENTRY PER THREAD;
-  - it writes the thread's status: "thinking" while Claude is on a
-    turn, "waiting_on_you" when the reply asks me something or the
-    thread still lists items waiting on me, "idle" otherwise; and, at the end of every turn, the thread's jobs: the
+  - when /board-status runs, it writes the thread's status:
+    "waiting_on_you" when the reply asks me something or the
+    thread still lists items waiting on me, "idle" otherwise; and the thread's jobs: the
     background work still running (commands, subagents, monitors,
     workflows) as Claude Code reports it, [{text, type, id}], empty
     when nothing runs. The board lights "working" on a thread with

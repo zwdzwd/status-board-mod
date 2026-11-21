@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.15.6'
+const VERSION = '0.15.7'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -38,6 +38,7 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 
 // ---- State of this session ----
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
+let perTurn = false                      // STATUS_BOARD_PER_TURN=1: the old per-turn status writes; off by default
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
 let priorIds: string[] = []              // this chat's ids before a /clear, until its entry is moved
 let threadId = ''                        // this thread's cmsg_ id, once a listing has named it
@@ -716,7 +717,7 @@ async function init($: Engine): Promise<void> {
     if (found) {
       registeredHere = found.label === PLACEHOLDER
       if (!viaIndex) void indexWrite($, found)
-      firstWrite = setStatus($, turnActive ? 'thinking' : 'idle', false).catch(() => {})
+      if (perTurn) firstWrite = setStatus($, turnActive ? 'thinking' : 'idle', false).catch(() => {})
       say($, `board: ${found.name} / ${found.label}`)
       void checkMail($, found.cardId)
     } else if (noBoard) {
@@ -888,6 +889,7 @@ export const register: Register = on => {
     try { await $.command.register({ name: 'board-info', description: 'Show which Status Board card and thread this chat updates' }) } catch {}
     try { sessionId = await $.session.id() } catch {}
     remoteId = await findRemoteId($)
+    try { perTurn = (await $.env.get('STATUS_BOARD_PER_TURN')) === '1' } catch {}
     try { await limit($, findBoard($), 3000, 'board lookup') } catch {}
     trace($, `session.start: remote ${remoteId || 'none'}, board ${BOARD}`)
     // A plain terminal session (no remote id) is not on the board: it does no board work at all.
@@ -901,7 +903,7 @@ export const register: Register = on => {
   // button's tooltip). A /clear is no end for the thread, which goes on under a new id.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') { pendingClear = true; return next(e) }
-    if (found) {
+    if (found && perTurn) {
       const left = next.budget.remainingMs
       const ms = Math.min(Number.isFinite(left) ? left : 8000, 8000) - 300
       // A session that ends mid-turn is no longer thinking: it goes idle (or waiting, while it lists items).
@@ -969,7 +971,7 @@ export const register: Register = on => {
       // A turn the user started is the thread taking up what it waited on: its items are marked as being
       // worked on now, and the thread's message at the end of the turn lists again whatever still waits.
       if (found && initDone && fromUser(String(e.text || ''))) asksWork = true
-      if (found && initDone) void setStatus($, 'thinking')
+      if (perTurn && found && initDone) void setStatus($, 'thinking')
     }
     return next(e)
   })
@@ -992,6 +994,8 @@ export const register: Register = on => {
       try {
         await initPromise                     // a first turn can end before the lookup has
         if (noBoard || coordinator || seq !== turnSeq) return
+        // The board changes only when /board-status ran this turn (the model's thread listing), unless per-turn writes are on.
+        if (!perTurn && !seenList) return
         if (!found) found = await indexLookup($)                     // the user may have placed this chat
         if (!found && remoteId) {                                   // or this thread's Claude did, on a new card
           try { found = findIn(await cards($)); if (found) void indexWrite($, found) } catch {}

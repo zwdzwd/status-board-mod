@@ -5,15 +5,14 @@ Five parts, one version number (`VERSION`; the same string is in
 `.claude-plugin/plugin.json`, `hooks/register.ts`, `board/project-board.html`,
 `board/rules.md`, and in `meta/instruction.version` on the board):
 
-- **The plugin** (`.claude-plugin/`, `hooks/register.ts`): a Claude Code plugin. In a
-  thread it writes the thread's status (thinking / waiting on you / idle) at the start and end
-  of every turn, the thread's running background jobs (the board lights "working"), and its
-  "waiting on you" list, read from the "Waiting on you:" line the thread ends each message with
-  (see the board-status skill); the thread drops an item once it is addressed, and while a turn
-  the user started runs, the board marks its items as being worked on. It
-  places a new thread on the card that holds its project's other threads, by the project's
-  thread listing; a thread it cannot place shows on the board as "not on any card", never on a
-  guessed card. The card's thread list is synced only by `/board-status`. A project
+- **The plugin** (`.claude-plugin/`, `hooks/register.ts`): a Claude Code plugin. It writes to
+  the board only in a turn where `/board-status` ran (the thread's listing of its project's
+  threads): it places the thread on the card that holds its project's other threads, syncs the
+  card's thread list, and records the thread's status and "waiting on you" list (read from the
+  "Waiting on you:" line the thread ends each message with). Other turns write nothing, so a
+  restart or a disconnected session never leaves a stale entry behind; the board's colours come
+  from the user's own clicks. A thread it cannot place shows on the board as "not on any card",
+  never on a guessed card. `STATUS_BOARD_PER_TURN=1` brings back the old writes on every turn. A project
   conversation is left off the board; the mod writes nothing there. A log of what the mod
   does is kept in `~/.claude/status-board.log`.
   The plugin takes the board's address from your `board-skill` skill (the newest copy
