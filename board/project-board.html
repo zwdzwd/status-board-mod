@@ -116,7 +116,20 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     const label = t.label || "Thread", cls = "t";
     const m = el("span",{class:"m","aria-hidden":"true"}); m.style.background = heat(clicks[tidOf(t)]);
     const kids = [m, el("span",{class:"l",text:label})];
-    if (safe(t.url)) { const link = el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label}, ...kids); link.addEventListener("click", () => markOpened(t)); return link; }
+    if (safe(t.url)) {
+      const link = el("a",{class:cls,href:t.url,target:"_blank",rel:"noopener",title:label}, ...kids);
+      // Opening a thread in another project can unload this page before the save lands, so the save starts on
+      // pointerdown, and the click waits for it (up to 1.5 s) before letting the link open.
+      let saving = null, saved = false;
+      const start = () => { if (!saving) saving = markOpened(t).then(() => { saved = true; }); return saving; };
+      link.addEventListener("pointerdown", start);
+      link.addEventListener("click", ev => {
+        if (saved || link.dataset.go) { delete link.dataset.go; return; }
+        ev.preventDefault();
+        Promise.race([start(), new Promise(r => setTimeout(r, 1500))]).then(() => { link.dataset.go = "1"; link.click(); });
+      });
+      return link;
+    }
     return el("span",{class:cls,title:label + " (no link yet)"}, ...kids);
   }
   // Record that this thread was opened from the board (a per-thread document; no thread has to report).
