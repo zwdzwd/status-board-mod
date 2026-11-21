@@ -117,6 +117,11 @@ Bump the version in the five places listed at the top, run the tests, commit, pu
   session id. The thread's own session writes its status and jobs; `/board-status` in any
   thread makes the list match the project's open threads. Resolve threads rather than delete
   them.
+- Usage in the board header: `bin/usage-statusline.py` is a Claude Code status line script that
+  saves the account's 5-hour and weekly usage percentages to `~/.claude/usage.json`; the plugin
+  copies them to `meta/usage` when they change. Set it up once per machine with
+  `"statusLine": {"type": "command", "command": "python3 <repo>/bin/usage-statusline.py"}` in
+  `~/.claude/settings.json`. Only Pro and Max accounts get the figures, after a session's first reply.
 - Other collections: `sessions/<uuid>` (the plugin's index: which card and thread a session is),
   `unmatched/<uuid>` (threads the plugin could not place, shown on the board), `checkins/<thread
   id>` (the `/board-status` write that, in auto mode, lets the plugin write for the session),

@@ -41,6 +41,10 @@ a.t:hover{background:var(--hover);color:var(--fg)}
 /* Recency: the marker takes a turbo colour by age; bold when active today, fading after 3 days and a week. */
 .t .m{border-radius:4px}
 .t .m::before{content:none}
+.usage{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.usage b{font-weight:600;color:var(--fg)}
+.usage .hi{color:var(--red)}
+.usage .stale{opacity:.5}
 .t .md{margin-left:auto;padding-left:8px;flex:none;font-size:10.5px;color:var(--muted);font-weight:400;white-space:nowrap}
 .t .m.nr{background:transparent;border:1.5px dashed var(--muted)}
 .t.a0{color:var(--fg);font-weight:600}
@@ -71,7 +75,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 </style>
 
 <div class="wrap">
-  <header><h1>Status Board</h1><span class="count" id="count"></span><span class="sp"></span><button class="lb" id="notesBtn" type="button">Notes</button></header>
+  <header><h1>Status Board</h1><span class="count" id="count"></span><span class="usage" id="usage"></span><span class="sp"></span><button class="lb" id="notesBtn" type="button">Notes</button></header>
   <div id="notes" class="notes" hidden></div>
   <div id="unmatched" class="bar" hidden></div>
   <div id="board" aria-live="polite"><p class="none">Loading…</p></div>
@@ -82,7 +86,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
 
 <script>
 (function(){
-  const VERSION = "0.15.3";   // one version for board, mod and rules; bump all together
+  const VERSION = "0.15.4";   // one version for board, mod and rules; bump all together
   const SECTIONS = [{key:"paper", label:"Analysis"}, {key:"software", label:"Software"}, {key:"misc", label:"Misc"}];
   const CAT_ALIAS = {papers:"paper", research:"paper", tool:"software", tools:"software", code:"software",
     grant:"misc", grants:"misc", talk:"misc", talks:"misc", personal:"misc", other:"misc"};
@@ -173,6 +177,17 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     box.hidden = !recent.length;
     box.textContent = recent.length ? "Not on any card: " + recent.map(r => r.title || r.session || r.id).join(", ") : "";
   }
+  // Account usage (meta/usage, forwarded by the plugin from the status line): 5-hour and weekly percentages.
+  function renderUsage(d){
+    const box = $("usage"); box.replaceChildren(); if (!d) return;
+    const when = r => { if (!r) return ""; const m = Math.round((r * 1000 - Date.now()) / 60000); return m <= 0 ? "reset due" : "resets in " + (m < 90 ? m + " min" : m < 2880 ? Math.round(m / 60) + " h" : Math.round(m / 1440) + " days"); };
+    const part = (k, name) => { const w = d[k]; if (!w || typeof w.pct !== "number") return null;
+      const sp = el("span",{title:when(w.resets_at)}, name + " ", el("b",{class:w.pct >= 80 ? "hi" : "",text:w.pct + "%"})); return sp; };
+    const a = part("five_hour", "5 h"), b = part("seven_day", "week");
+    const age = (Date.now() - Date.parse(d.from || d.at || "")) / 36e5;
+    if (a) box.append(a); if (a && b) box.append(" · "); if (b) box.append(b);
+    box.classList.toggle("stale", age > 3); box.title = "As of " + (isNaN(age) ? "an unknown time" : age < 1 ? "the last hour" : Math.round(age) + " h ago") + ", from the last Claude Code session that reported it";
+  }
   function skillPrompt(link){
     return ['Set up my personal skill "board-skill" so every session knows where my Status Board is. Save it with exactly the content below. If a skill with that name exists and cannot be updated in place, remove it and save this one as new. If you cannot save skills in this session, show me the content so I can add it under Customize, Skills.',
       '', '---', 'name: board-skill', "description: Update this project's card on Wanding's Status Board, or find the board's address.", '---',
@@ -198,6 +213,7 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;user-select:all;m
     db.collection("projects").onSnapshot(s => { projects = s.docs.filter(d => d.exists).map(d => Object.assign({id:d.id}, d.data())); render(); renderNotes(); },
       err => { $("board").replaceChildren(el("p",{class:"none",text:"The board couldn't load (" + (err && err.code || "error") + "). Reload to try again."})); });
     // The board's own link is kept in its data (meta/instruction.board): a page cannot read its own address.
+    db.doc("meta/usage").onSnapshot(s => renderUsage(s.exists ? s.data() : null), () => {});
     db.doc("meta/instruction").onSnapshot(s => { const d = s.exists ? s.data() : null;
       boardLink = d && typeof d.board === "string" && /^https:\/\/claude\.ai\/(code\/)?artifact\/[A-Za-z0-9-]+$/.test(d.board) ? d.board : "";
       $("skillBtn").disabled = !boardLink; }, () => {});

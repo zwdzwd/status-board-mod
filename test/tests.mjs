@@ -481,6 +481,19 @@ console.log('Z. the card entry carries the model that wrote the latest reply, re
   await E.fire('turn.complete', { answer: 'Done.', reason: 'answer' }); await settle()
   ok(E.entry('methscope').model === 'sonnet-5-5', 'latest real model, without the claude- prefix: ' + E.entry('methscope').model) }
 
+console.log('U. account usage saved by the status line script is copied to meta/usage when it changes')
+{ const files = { '/u/.claude/usage.json': { text: JSON.stringify({ at: 1795290967, five_hour: { pct: 42, resets_at: 1795300000 }, seven_day: { pct: 17, resets_at: 1795800000 } }), at: 1 } }
+  const E = await env({ db: card([{ label: 'HPC', session: R }]), home: '/u', files })
+  await E.fire('session.start', {}); await settle()
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'Done.', reason: 'answer' }); await settle()
+  const u = E.db.meta && E.db.meta.usage
+  ok(u && u.five_hour.pct === 42 && u.seven_day.pct === 17, 'usage written: ' + JSON.stringify(u))
+  const n = E.writes.filter(w => w.c === 'meta').length
+  await E.fire('turn.start', {}); await settle()
+  await E.fire('turn.complete', { answer: 'Done.', reason: 'answer' }); await settle()
+  ok(E.writes.filter(w => w.c === 'meta').length === n, 'unchanged figures are not written again') }
+
 console.log('T. the thread\'s "Waiting on you" line is the entry\'s asks; only the thread changes it; written only with status writes')
 { const E = await env({ db: card([{ label: 'HPC', session: 'cse_01REMOTEaaaaaaaaaaaaaaaa', status: 'idle' }]) })
   await E.fire('session.start', {}); await settle()

@@ -11,7 +11,7 @@ import type { Register, EngineInterface as Engine } from 'claude-code'
 // it and keeps it as the entry's "asks" list, written with the turn's status writes. Only the thread
 // changes the list: an item it stops listing is gone.
 
-const VERSION = '0.15.3'
+const VERSION = '0.15.4'
 const PLUGIN = 'status-board'
 // The board's address comes from the user's board-skill skill (see findBoard), so a new
 // board needs only the skill changed. This one is used where no such skill is on disk.
@@ -40,6 +40,7 @@ type ProjThread = { ids: string[]; name: string; open: boolean }
 let sessionId = ''                       // $.session.id(): the transcript's id; changes after /clear
 let modelNow = ''                        // the model that wrote this session's latest reply, read from its transcript
 let transcriptFile = ''
+let usageSent = ''                       // the last usage figures written to the board (meta/usage), to skip repeats
 let remoteId = ''                        // the remote session id (cse_…), when this is a remote session
 let priorIds: string[] = []              // this chat's ids before a /clear, until its entry is moved
 let threadId = ''                        // this thread's cmsg_ id, once a listing has named it
@@ -832,6 +833,28 @@ async function readModel($: Engine): Promise<void> {
   } catch {}
 }
 
+// Account usage (5-hour and weekly percentages): a status line script saves them to <config dir>/usage.json
+// (bin/usage-statusline.py); this copies them to meta/usage when they change, for the board header.
+async function sendUsage($: Engine): Promise<void> {
+  try {
+    let dir = ''
+    try { dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || '' } catch {}
+    if (!dir) { try { const home = await $.env.get('HOME'); if (home) dir = home + '/.claude' } catch {} }
+    if (!dir) return
+    const u = JSON.parse(String(await $.fs.read(dir + '/usage.json')))
+    const data: Record<string, unknown> = { at: now(), from: u.at ? new Date(Number(u.at) * 1000).toISOString() : now() }
+    for (const k of ['five_hour', 'seven_day']) if (u[k] && typeof u[k].pct === 'number') data[k] = { pct: u[k].pct, resets_at: u[k].resets_at ?? null }
+    if (!data.five_hour && !data.seven_day) return
+    const key = JSON.stringify([data.five_hour, data.seven_day])
+    if (key === usageSent) return
+    const d = await getDoc($, 'meta', 'usage')
+    const args: Record<string, unknown> = { action: 'set', collection: 'meta', doc_id: 'usage', data }
+    if (d) args.if_version = d.version
+    await call($, args)
+    usageSent = key
+  } catch {}
+}
+
 // What a turn's final message means for the board: a question or a decision for the user, or not.
 // What still runs is the jobs list's business.
 const ASK = 'the message asks the user a question, or waits for the user to decide, approve, confirm or provide something'
@@ -1033,6 +1056,7 @@ export const register: Register = on => {
         if (!found) { await markUnmatched($); return }
         let d: { status: string; waiting?: string } = reason === 'answer' ? await decide($, answer) : { status: 'idle' }
         await modelRead
+        void sendUsage($)
         // A turn that lists what waits on the user is waiting on the user, whatever the classifier said.
         if (asksSaid && asksSaid.length) d = { status: 'waiting_on_you', waiting: asksSaid[0] }
         if (seq !== turnSeq) return
